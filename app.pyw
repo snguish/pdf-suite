@@ -1,0 +1,55 @@
+import customtkinter as ctk
+import sys
+import os
+
+# Ensure the app can find its internal modules even when launched from a .bat
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from core.session import SessionManager
+from ui.main_window import MainWindow
+
+def main():
+    # --- 1. GLOBAL UI SETTINGS ---
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    
+    # Ensures the UI looks crisp on high-resolution laptop screens
+    ctk.set_widget_scaling(1.0)
+    ctk.set_window_scaling(1.0)
+
+    # --- 2. WINDOW INITIALIZATION ---
+    root = ctk.CTk()
+    root.title("PDF Suite v1.0")
+    root.geometry("1280x820")
+    
+    # --- 3. SET WINDOW ICON (SAFE LOADING) ---
+    # We check if the file exists first so the app doesn't crash if it's missing
+    if os.path.exists("app_icon.ico"):
+        try:
+            root.iconbitmap("app_icon.ico")
+        except Exception:
+            # Silently skip if the icon format is invalid or locked
+            pass
+
+    # --- 4. ROBUST SPACE-PROOF PATH PARSING ---
+    initial_file = None
+    if len(sys.argv) > 1:
+        # Join all arguments in case Windows split the path due to spaces.
+        # Then strip any extra quotes that Windows/Batch often double-wrap.
+        full_path = " ".join(sys.argv[1:])
+        initial_file = full_path.replace('"', '').strip()
+
+    # --- 5. LAUNCH THE APPLICATION ---
+    try:
+        session = SessionManager()
+        # MainWindow handles the 'check_ready_and_load' logic internally
+        app = MainWindow(root, session, initial_file=initial_file)
+        root.mainloop()
+        
+    except Exception as e:
+        # If the app crashes on startup, show a clear error message to the user
+        from tkinter import messagebox
+        messagebox.showerror("Startup Error", f"PDF Suite failed to launch:\n{str(e)}")
+
+if __name__ == "__main__":
+    main()
