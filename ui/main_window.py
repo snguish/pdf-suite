@@ -339,22 +339,60 @@ class MainWindow:
             self.extract_mode_btn.configure(text="Extract Page(s)", fg_color="#3d3d3d")
             self.range_entry.pack_forget(); self.save_extract_btn.pack_forget()
             if self.sidebar: self.sidebar.toggle_extraction_mode(False)
+    def parse_page_range_entry(self):
+        txt = self.range_entry.get().strip()
+        if not txt or not self.engine:
+            return []
+
+        idx = []
+        for part in txt.split(','):
+            token = part.strip()
+            if not token:
+                continue
+            if '-' in token:
+                bounds = [b.strip() for b in token.split('-', 1)]
+                if len(bounds) != 2 or not bounds[0] or not bounds[1]:
+                    raise ValueError
+                start, end = map(int, bounds)
+                if start > end:
+                    raise ValueError
+                idx.extend(range(start - 1, end))
+            else:
+                idx.append(int(token) - 1)
+
+        return [i for i in sorted(set(idx)) if 0 <= i < len(self.engine.doc)]
+
     def execute_extraction(self):
-        sel = self.sidebar.selected_pages
-        if not sel: return messagebox.showwarning("Empty", "Select pages first.")
-        path = filedialog.asksaveasfilename(defaultextension=".pdf")
-        if path: self.engine.extract_pages(list(sel), path)
-    def apply_range_from_entry(self):
-        txt = self.range_entry.get()
-        if not txt or not self.engine: return
+        if not self.engine or not self.sidebar:
+            return
+
         try:
-            idx = []
-            for p in txt.split(','):
-                if '-' in p: s, e = map(int, p.strip().split('-')); idx.extend(range(s-1, e))
-                else: idx.append(int(p.strip())-1)
-            valid = [i for i in sorted(set(idx)) if 0 <= i < len(self.engine.doc)]
-            if self.sidebar: self.sidebar.select_range(valid)
-        except: messagebox.showerror("Range Error", "Invalid format.")
+            range_selection = self.parse_page_range_entry()
+        except ValueError:
+            return messagebox.showerror("Range Error", "Invalid format. Use values like 1-5, 10.")
+
+        if range_selection:
+            self.sidebar.select_range(range_selection)
+            selected_pages = set(range_selection)
+        else:
+            selected_pages = set(self.sidebar.selected_pages)
+
+        if not selected_pages:
+            return messagebox.showwarning("Empty", "Select pages using checkboxes or enter a page range.")
+
+        path = filedialog.asksaveasfilename(defaultextension=".pdf")
+        if path:
+            self.engine.extract_pages(sorted(selected_pages), path)
+
+    def apply_range_from_entry(self):
+        if not self.engine:
+            return
+        try:
+            valid = self.parse_page_range_entry()
+            if self.sidebar:
+                self.sidebar.select_range(valid)
+        except ValueError:
+            messagebox.showerror("Range Error", "Invalid format. Use values like 1-5, 10.")
     def rotate_page(self, idx): self.engine.rotate_page(idx); self.sidebar.refresh_thumbnail(idx); self.load_page(idx) if idx == self.current_page_index else None
     def clear_nav_area(self):
         if self.sidebar: self.sidebar.stop_loading()
