@@ -1,90 +1,226 @@
-# Technical Documentation: PDF Suite v1.0
+# PDF Suite Technical Documentation
 
-This technical documentation provides a high-level overview of the **PDF Suite v1.0** architecture, component interactions, and deployment logic. It is designed to serve as a reference for maintenance or auditing the tool's data integrity.
+**Current development version:** 1.1
 
----
+**Platform:** Windows desktop
 
-## 1. System Overview
-**PDF Suite** is a modular desktop application built in Python. Its primary purpose is to provide a high-performance environment for reviewing PDF documents, performing precise crops, and generating audit-ready interaction logs. 
+**Last updated:** July 2026
 
-### Core Tech Stack:
-* **GUI Framework:** `customtkinter` (Modernized `tkinter` with High-DPI scaling and Dark Mode support).
-* **PDF Engine:** `PyMuPDF` (under the `fitz` module), chosen for its industry-leading rendering speed and robust annotation support.
-* **Environment:** Isolated Virtual Environment (`venv`) to ensure zero-conflict deployment on enterprise machines.
+## 1. Purpose and scope
 
----
+PDF Suite is a local desktop application for reviewing and organizing PDF documents. It supports page rendering and navigation, audit-aware highlights and notes, cropping, page extraction, PDF combining, page reordering, rotation, image snapshots, and note export.
 
-## 2. Architecture Logic
-The application follows a **Modular Layered Architecture**. By separating the "Logic" from the "Interface," the tool remains stable and easy to troubleshoot.
+All document processing is local. The application does not upload PDFs, annotations, signatures, or user information to a remote service.
 
-### A. The Entry Layer (`app.pyw`)
-The "Receptionist" of the app. It handles global configurations, parses command-line arguments for "Open With" functionality, and initializes the primary window instance.
+Form filling and visual signatures are planned for the next implementation milestone. Certificate-backed cryptographic signing is a separate advanced capability and is not currently implemented.
 
-### B. The UI Layer (`ui/`)
-* **`main_window.py`:** The "Conductor." It manages a dynamic **4-column layout** (Sidebar | Splitter | Canvas | Inspector). It handles all top-level events, including file actions, coordinate translation, and secondary window branding.
-* **`canvas.py`:** A custom canvas that handles PDF rendering, centering logic, and mouse-event capturing for cropping and highlighting.
-* **`sidebar.py`:** Manages page thumbnails using background threading to prevent interface freezing during document load.
-* **Note Inspector (Dynamic):** A specialized panel that remains hidden until triggered by a double-click on an annotation. It allows users to edit note text while viewing audit metadata.
+## 2. Technology stack
 
-### C. The Core Layer (`core/`)
-* **`engine.py`:** Wraps `PyMuPDF`. It manages structured metadata for annotations, specifically preserving a permanent `CREATED` stamp while updating a `MODIFIED` stamp during edits.
-* **`session.py`:** Manages temporary user data and state during a single run.
+- **Language:** Python 3
+- **GUI:** CustomTkinter and Tk
+- **PDF engine:** PyMuPDF (`fitz`)
+- **Image handling:** Pillow
+- **Windows packaging:** PyInstaller
+- **Source control:** Git
 
----
+Runtime dependencies are declared in `requirements.txt`. Build-only dependencies are declared in `requirements-build.txt`.
 
-## 3. Project Structure
+## 3. Repository structure
+
 ```text
-PDF_Suite_v1.0/
-├── app.pyw                  # Application Entry Point
-├── Run_PDF_Suite.bat        # Multi-instance Optimized Launcher
-├── requirements.txt         # Dependency List
-├── README.md                # User Manual & Licensing
-├── app_icon.ico             # Branded Application Icon
-├── core/                    # Logic Layer
-│   ├── engine.py            # PDF Logic & Metadata Parsing
-│   └── session.py           # Session Management
-├── ui/                      # Presentation Layer
-│   ├── main_window.py       # Layout, Bindings & Coordination
-│   ├── canvas.py            # Rendering & Mouse Events
-│   └── sidebar.py           # Thumbnail Navigation
-└── utils/                   # Helper Layer
-    └── math_tools.py        # Shared Math Utilities
+pdf-suite/
+|-- app.pyw                    Application entry point
+|-- app_icon.ico               Window and executable icon
+|-- build_windows.ps1          Reproducible Windows build script
+|-- requirements.txt           Runtime dependencies
+|-- requirements-build.txt     Runtime and packaging dependencies
+|-- README.md                  User-facing instructions
+|-- technical_documentation.md Maintainer documentation
+|-- core/
+|   |-- engine.py              PDF rendering, annotation, and page operations
+|   `-- session.py             Session and unsaved-change state
+|-- ui/
+|   |-- main_window.py         Window layout, menus, commands, and coordination
+|   |-- canvas.py              Rendering surface and pointer interaction
+|   `-- sidebar.py             Thumbnails, selection, and page context actions
+`-- utils/
+    `-- math_tools.py          Shared utility functions
 ```
 
+`run_pdf_suite.bat` remains in the repository as a legacy development launcher. Packaged releases should use `PDF Suite.exe` instead.
+
+## 4. Application architecture
+
+### 4.1 Entry layer
+
+`app.pyw` configures CustomTkinter, creates the root window, resolves bundled resources, reads an optional PDF path from the Windows command line, and starts `MainWindow`.
+
+Resource lookup supports both source execution and PyInstaller's temporary bundle location through `sys._MEIPASS`. This ensures that `app_icon.ico` works in development and in the packaged executable.
+
+### 4.2 Session layer
+
+`SessionManager` owns transient document state:
+
+- `unsaved_changes` indicates whether the open document differs from its saved source.
+- `history` is reserved for the planned undo/redo implementation.
+- `mark_changed()`, `mark_saved()`, and `reset()` provide explicit state transitions.
+
+The window title contains an asterisk when changes are unsaved. Opening another document or closing the window requires confirmation before those changes are discarded.
+
+### 4.3 PDF engine
+
+`PDFEngine` wraps the active PyMuPDF document. Its responsibilities include:
+
+- Rendering full pages and thumbnails.
+- Rotating, cropping, moving, deleting, and extracting pages.
+- Atomically combining the active document with additional PDFs.
+- Creating, reading, editing, deleting, and exporting highlight notes.
+- Saving incrementally when overwriting a source-backed document.
+- Performing a full save for a new in-memory combined document or a copy.
+- Closing the native PDF handle when a document is replaced or the window closes.
+
+The combine operation constructs a separate in-memory document and only replaces the active document after all selected sources have been inserted successfully. This prevents a failed source from leaving a partially combined active document.
+
+### 4.4 User-interface layer
+
+`MainWindow` coordinates commands and document state. Version 1.1 introduces File, Pages, and View menus while retaining the existing toolbar during the staged UI migration.
+
+The current layout is:
+
+```text
+Menu bar
+Toolbar
+Thumbnail panel | Document canvas | Contextual note inspector
+Status bar
+```
+
+The Pages menu and thumbnail context menu expose document organization commands. After page structure changes, the thumbnail view is rebuilt against the updated document.
+
+`PDFCanvas` owns pointer coordinates, selection rectangles, panning, and wheel-event routing. It prevents handled wheel events from propagating to the root window twice.
+
+`Sidebar` loads thumbnails progressively and provides page selection plus context actions for rotation, movement, and deletion.
+
+## 5. Navigation and input behavior
+
+Normal mouse-wheel input changes pages. `Ctrl + Mouse Wheel` zooms around the pointer position rather than the center of the page.
+
+Cursor-focused zoom follows this sequence:
+
+1. Translate the pointer's canvas position into a PDF coordinate at the old zoom.
+2. Render the page at the bounded new zoom level.
+3. Calculate the PDF coordinate's new canvas position.
+4. Adjust the canvas view so that the same document location remains beneath the pointer.
+
+Zoom is constrained to 10–800 percent.
+
+Single-letter document shortcuts are ignored when an Entry, Text, ComboBox, or Spinbox has focus. This prevents commands such as crop, highlight, or sidebar toggle from firing while a user types.
+
+## 6. Annotation and audit metadata
+
+Highlights store structured text in the PDF annotation content:
+
+```text
+CREATED: <user> @ <timestamp>
+MODIFIED: <user> @ <timestamp>
 ---
+<comment>
+```
 
-## 4. Data Flow
-The application processes data through a specific lifecycle:
+Editing a note preserves its original `CREATED` line and replaces the `MODIFIED` identity and timestamp. CSV note export includes page, user, creation time, last-modified time, and comment.
 
-Ingestion: app.pyw passes a file path to MainWindow.
+The metadata improves traceability but is not a cryptographic audit mechanism. Anyone with a capable PDF editor can alter annotation metadata.
 
-Rendering: MainWindow requests a high-quality render from PDFEngine.
+## 7. Saving and document lifecycle
 
-Display: The render is sent to PDFCanvas, which applies centering offsets.
+Document-changing operations call `mark_document_changed()`. This currently includes highlights, note edits, note deletion, cropping, rotation, combining, page movement, and page deletion.
 
-Interaction: The user draws a highlight; MainWindow.get_pdf_coords translates screen pixels to PDF points by subtracting workspace offsets.
+Saving behavior is divided into two paths:
 
-Audit Enrichment: PDFEngine creates a structured metadata block (CREATED vs MODIFIED) and attaches it to the annotation.
+- **Update Original File:** uses incremental saving when the PyMuPDF document is still backed by the same source path.
+- **Save Copy as PDF:** performs a full save to a new path and leaves the original document association unchanged.
 
-Persistence: Changes are saved incrementally to the PDF, and audit logs are exported as multi-timestamp CSVs.
+Combined documents are created in memory and therefore have no PyMuPDF source name. They use a full save even when the user elects to update the path originally opened by the application.
 
----
+Open and save failures are presented through user-facing dialogs. An existing PDF engine is replaced only after a new document has opened successfully.
 
-## 5. Deployment & Environment Strategy
-The tool uses a Self-Bootstrapping Launcher (Run_PDF_Suite.bat) optimized for multi-instance use.
+## 8. Page organization
 
-Optimized Boot Sequence:
-Environment Check: If \venv\ exists, it skips directly to launch to avoid "File in Use" errors when opening multiple documents.
+The following page operations are implemented:
 
-Sync: If missing, it creates the environment and installs dependencies from requirements.txt.
+- Combine one or more PDFs with the active document.
+- Extract checkbox-selected pages or a typed page range.
+- Rotate a page by 90 degrees.
+- Move a page one position up or down.
+- Delete a page after confirmation.
 
-Silent Launch: Executes the app via pythonw.exe from within the local venv.
+Deletion of the only remaining page is rejected because a valid PDF must contain at least one page.
 
----
+The typed range parser accepts comma-separated pages and inclusive ranges, for example `1-5, 10`. Invalid syntax produces an error dialog, while page numbers outside the document are ignored.
 
-## 6. Security & Privacy
-Data Residency: All PDF processing is performed locally. No data is transmitted to external servers.
+## 9. Windows executable build
 
-Audit Integrity: Interaction logs (CSV) include both Created At and Last Modified timestamps, along with system IDs, ensuring a robust trail of evidence.
+Run the following from PowerShell at the repository root:
 
-Internal Technical Document | v1.0 | April 2026
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows.ps1
+```
+
+The script:
+
+1. Creates or repairs `.build-venv`.
+2. Installs the declared runtime and build dependencies.
+3. Runs PyInstaller in windowed, one-folder mode.
+4. Embeds the application icon and includes CustomTkinter assets.
+
+The output is:
+
+```text
+dist\PDF Suite\PDF Suite.exe
+```
+
+The complete `dist\PDF Suite` directory is the portable application. The executable should not be distributed without its adjacent `_internal` content.
+
+One-folder packaging is intentional for the initial release because it starts faster and makes missing-resource problems easier to diagnose than one-file extraction.
+
+## 10. Git workflow
+
+Modernization work is isolated on:
+
+```text
+feature/modernize-pdf-suite
+```
+
+The first modernization milestone is recorded by commit:
+
+```text
+82707b9 Modernize PDF navigation and document workflow
+```
+
+Generated environments and PyInstaller output are excluded by `.gitignore`.
+
+## 11. Verification
+
+The current milestone has been checked with:
+
+- Python bytecode compilation for the application modules.
+- `git diff --check` for patch formatting errors.
+- An integration test that generates PDFs, combines them, reorders pages, deletes a page, saves the result, reopens it, and validates page content.
+- A successful PyInstaller Windows build.
+
+Interactive GUI testing is still required for pointer positioning, high-DPI behavior, menus, dialogs, and Windows file association before release.
+
+## 12. Known limitations and roadmap
+
+The following work remains:
+
+1. Complete the contextual-panel UI redesign and retire the crowded legacy toolbar.
+2. Add undo and redo using the reserved session history.
+3. Detect and fill existing AcroForm fields.
+4. Add typed, drawn, and imported-image visual signatures.
+5. Add form and signature flattening during export.
+6. Improve thumbnail worker isolation and cancellation for large PDFs.
+7. Add automated unit and GUI tests.
+8. Add a Windows installer and optional file-association registration.
+9. Evaluate certificate-backed digital signatures as a separate security-focused project.
+
+Visual signatures must not be described as digital signatures. A visual mark does not validate document integrity or signer identity. Cryptographic signing requires certificate handling, byte-range signing, validation, and preservation rules beyond the current annotation and image workflows.
