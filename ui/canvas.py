@@ -14,12 +14,16 @@ class PDFCanvas(ctk.CTkCanvas):
         self.start_x = self.start_y = 0
         self._pan_start_x = self._pan_start_y = 0
         self.selection_rect_id = None
+        self.signature_overlays = []
+        self.selected_signature_id = None
+        self._signature_drag = None
         self.crop_mode = self.highlight_mode = self.signature_mode = False
         
         # Callbacks
         self.hover_callback = self.double_click_callback = self.right_click_callback = None
         self.wheel_callback = None
         self.selection_callback = None
+        self.signature_change_callback = None
 
         # Bindings
         self.bind("<ButtonPress-1>", self.on_left_click)
@@ -57,23 +61,84 @@ class PDFCanvas(ctk.CTkCanvas):
         self.clear_selection()
 
     def on_left_click(self, e):
-        if not (self.crop_mode or self.highlight_mode or self.signature_mode): return
+        if not (self.crop_mode or self.highlight_mode or self.signature_mode):
+            self._begin_signature_edit(self.canvasx(e.x), self.canvasy(e.y))
+            return
         self.start_x, self.start_y = self.canvasx(e.x), self.canvasy(e.y)
         self.clear_selection()
         color = "red" if self.crop_mode else "#2f9bff" if self.signature_mode else "#FFD700"
         self.selection_rect_id = self.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline=color, width=2, dash=(4,4))
 
     def on_left_drag(self, e):
+        if self._signature_drag:
+            self._drag_signature(self.canvasx(e.x), self.canvasy(e.y))
+            return
         if self.selection_rect_id:
             self.coords(self.selection_rect_id, self.start_x, self.start_y, self.canvasx(e.x), self.canvasy(e.y))
 
     def on_left_release(self, e):
+        if self._signature_drag:
+            signature_id, _mode, _start, original = self._signature_drag
+            self._signature_drag = None
+            overlay = next((item for item in self.signature_overlays if item["id"] == signature_id), None)
+            if overlay and tuple(overlay["rect"]) != tuple(original) and self.signature_change_callback:
+                self.signature_change_callback(signature_id, tuple(overlay["rect"]))
+            return
         self.end_x, self.end_y = self.canvasx(e.x), self.canvasy(e.y)
         if self.selection_callback:
             self.selection_callback(e)
 
     def clear_selection(self):
         if self.selection_rect_id: self.delete(self.selection_rect_id); self.selection_rect_id = None
+
+    def set_signature_overlays(self, overlays):
+        self.signature_overlays = [{"id": item["id"], "rect": list(item["rect"])} for item in overlays]
+        if self.selected_signature_id not in {item["id"] for item in overlays}:
+            self.selected_signature_id = None
+        self._draw_signature_overlays()
+
+    def _draw_signature_overlays(self):
+        self.delete("signature-ui")
+        for item in self.signature_overlays:
+            if item["id"] != self.selected_signature_id:
+                continue
+            x0, y0, x1, y1 = item["rect"]
+            self.create_rectangle(x0, y0, x1, y1, outline="#2f9bff", width=2,
+                                  dash=(5, 3), tags="signature-ui")
+            for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)):
+                self.create_rectangle(x - 5, y - 5, x + 5, y + 5, fill="white",
+                                      outline="#2f9bff", width=2, tags="signature-ui")
+
+    def _begin_signature_edit(self, x, y):
+        hit = None
+        mode = "move"
+        for item in reversed(self.signature_overlays):
+            x0, y0, x1, y1 = item["rect"]
+            corners = {"nw": (x0, y0), "ne": (x1, y0), "sw": (x0, y1), "se": (x1, y1)}
+            corner = next((name for name, point in corners.items()
+                           if abs(x - point[0]) <= 9 and abs(y - point[1]) <= 9), None)
+            if corner or (x0 <= x <= x1 and y0 <= y <= y1):
+                hit, mode = item, corner or "move"
+                break
+        self.selected_signature_id = hit["id"] if hit else None
+        self._draw_signature_overlays()
+        if hit:
+            self._signature_drag = (hit["id"], mode, (x, y), tuple(hit["rect"]))
+
+    def _drag_signature(self, x, y):
+        signature_id, mode, (start_x, start_y), original = self._signature_drag
+        item = next(item for item in self.signature_overlays if item["id"] == signature_id)
+        x0, y0, x1, y1 = original
+        dx, dy = x - start_x, y - start_y
+        if mode == "move":
+            item["rect"] = [x0 + dx, y0 + dy, x1 + dx, y1 + dy]
+        else:
+            if "w" in mode: x0 += dx
+            if "e" in mode: x1 += dx
+            if "n" in mode: y0 += dy
+            if "s" in mode: y1 += dy
+            item["rect"] = [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
+        self._draw_signature_overlays()
 
     def get_selection_pixels(self):
         return (self.start_x, self.start_y, self.end_x, self.end_y) if self.selection_rect_id else None

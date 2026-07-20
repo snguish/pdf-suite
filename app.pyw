@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from core.version import APP_TITLE
 import sys
 import os
 
@@ -24,7 +25,7 @@ def main():
 
     # --- 2. WINDOW INITIALIZATION ---
     root = ctk.CTk()
-    root.title("PDF Suite v1.0")
+    root.title(APP_TITLE)
     root.geometry("1280x820")
     
     # --- 3. SET WINDOW ICON (SAFE LOADING) ---

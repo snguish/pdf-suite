@@ -5,7 +5,7 @@ class DarkMenuBar(ctk.CTkFrame):
     """In-window dark menu bar with lightweight keyboard-friendly popups."""
 
     def __init__(self, master, menus, **kwargs):
-        super().__init__(master, height=30, corner_radius=0, fg_color="#202020", **kwargs)
+        super().__init__(master, height=34, corner_radius=0, fg_color="#171b22", **kwargs)
         self.pack_propagate(False)
         self._popup = None
         self._active_button = None
@@ -13,13 +13,21 @@ class DarkMenuBar(ctk.CTkFrame):
         self.winfo_toplevel().bind("<Button-1>", self._root_click, add="+")
         for label, items in menus:
             button = ctk.CTkButton(
-                self, text=label, width=max(48, len(label) * 9 + 20), height=28,
-                corner_radius=0, fg_color="transparent", hover_color="#3d3d3d",
+                self, text=label, width=max(48, len(label) * 9 + 20), height=32,
+                corner_radius=4, fg_color="transparent", hover_color="#303844",
                 font=("Segoe UI", 11), command=lambda l=label, i=items: self.toggle_menu(l, i),
             )
-            button.pack(side="left", padx=(2, 0), pady=1)
+            button.pack(side="left", padx=(4 if not self._buttons else 0, 1), pady=1)
+            button._is_menu_button = True
             self._buttons[label] = button
             button.bind("<Enter>", lambda _e, l=label, i=items, b=button: self._switch_on_hover(l, i, b), add="+")
+
+        brand = ctk.CTkFrame(self, fg_color="transparent")
+        brand.pack(side="right", padx=12)
+        ctk.CTkLabel(brand, text="■", width=16, text_color="#58a6ff",
+                     font=("Segoe UI Symbol", 11)).pack(side="left")
+        ctk.CTkLabel(brand, text="PDF SUITE", text_color="#b8c0cc",
+                     font=("Segoe UI", 10, "bold")).pack(side="left", padx=(3, 0))
 
     def toggle_menu(self, label, items):
         button = self._buttons[label]
@@ -78,7 +86,7 @@ class DarkMenuBar(ctk.CTkFrame):
             self._popup.destroy()
             self._popup = None
         if self._active_button:
-            self._active_button.configure(fg_color="transparent")
+            self._active_button.configure(fg_color="transparent", border_width=0)
             self._active_button = None
 
     def _invoke(self, command):

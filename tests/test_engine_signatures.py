@@ -63,6 +63,44 @@ class PDFSignatureEngineTests(unittest.TestCase):
             engine.add_signature_image(0, (72, 72, 72, 72), self._signature_png())
         engine.close()
 
+    def test_signature_can_be_moved_undone_and_redone(self):
+        engine = PDFEngine(self.source_path)
+        signature_id = engine.add_signature_image(0, (72, 600, 300, 680), self._signature_png())
+        engine.update_signature(signature_id, (100, 500, 360, 590))
+        self.assertEqual(engine.get_signatures(0)[0]["rect"], (100.0, 500.0, 360.0, 590.0))
+        moved = engine.doc[0].get_pixmap(clip=fitz.Rect(100, 500, 360, 590), alpha=False)
+        self.assertLess(min(moved.samples), 240, "Moved signature rendered as an empty box")
+
+        self.assertTrue(engine.undo())
+        self.assertEqual(engine.get_signatures(0)[0]["rect"], (72.0, 600.0, 300.0, 680.0))
+        self.assertTrue(engine.redo())
+        self.assertEqual(engine.get_signatures(0)[0]["rect"], (100.0, 500.0, 360.0, 590.0))
+        engine.close()
+
+    def test_identical_signatures_are_independently_editable(self):
+        engine = PDFEngine(self.source_path)
+        image = self._signature_png()
+        first = engine.add_signature_image(0, (72, 600, 300, 680), image)
+        second = engine.add_signature_image(0, (72, 450, 300, 530), image)
+        engine.update_signature(first, (100, 610, 340, 690))
+
+        signatures = {item["id"]: item for item in engine.get_signatures(0)}
+        self.assertEqual(signatures[second]["rect"], (72.0, 450.0, 300.0, 530.0))
+        self.assertNotEqual(signatures[first]["xref"], signatures[second]["xref"])
+        engine.close()
+
+    def test_undo_state_can_replace_original_file(self):
+        engine = PDFEngine(self.source_path)
+        engine.add_signature_image(0, (72, 600, 300, 680), self._signature_png())
+        engine.add_signature_image(0, (72, 450, 300, 530), self._signature_png())
+        self.assertTrue(engine.undo())
+        engine.save_file(self.source_path, mark_saved=True)
+        engine.close()
+
+        result = fitz.open(self.source_path)
+        self.assertGreaterEqual(len(result[0].get_images(full=True)), 1)
+        result.close()
+
 
 if __name__ == "__main__":
     unittest.main()

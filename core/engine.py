@@ -2,12 +2,72 @@ import fitz
 import os
 from PIL import Image
 import getpass
+import copy
+import uuid
+import io
+import tempfile
 from datetime import datetime
 
 class PDFEngine:
     def __init__(self, filepath):
         fitz.TOOLS.mupdf_display_errors(False)
         self.doc = fitz.open(filepath)
+        self.filepath = os.path.normpath(filepath)
+        self._undo_stack = []
+        self._redo_stack = []
+        self.signatures = []
+        self._next_history_id = 1
+        self.history_id = self.saved_history_id = 0
+
+    def _snapshot(self):
+        # Do not garbage-collect here: compacting can renumber live widget/image
+        # xrefs that the UI and editable-signature records still reference.
+        return (self.doc.tobytes(deflate=True), copy.deepcopy(self.signatures), self.history_id)
+
+    def _restore(self, snapshot):
+        data, signatures, history_id = snapshot
+        old_doc = self.doc
+        self.doc = fitz.open(stream=data, filetype="pdf")
+        old_doc.close()
+        self.signatures = copy.deepcopy(signatures)
+        self.history_id = history_id
+
+    def _record_change(self):
+        self._undo_stack.append(self._snapshot())
+        if len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self.history_id = self._next_history_id
+        self._next_history_id += 1
+
+    @property
+    def can_undo(self):
+        return bool(self._undo_stack)
+
+    @property
+    def can_redo(self):
+        return bool(self._redo_stack)
+
+    @property
+    def is_modified(self):
+        return self.history_id != self.saved_history_id
+
+    def undo(self):
+        if not self._undo_stack:
+            return False
+        self._redo_stack.append(self._snapshot())
+        self._restore(self._undo_stack.pop())
+        return True
+
+    def redo(self):
+        if not self._redo_stack:
+            return False
+        self._undo_stack.append(self._snapshot())
+        self._restore(self._redo_stack.pop())
+        return True
+
+    def mark_saved(self):
+        self.saved_history_id = self.history_id
 
     def close(self):
         if self.doc and not self.doc.is_closed:
@@ -71,8 +131,12 @@ class PDFEngine:
                 continue
             if widget.field_flags & 1:
                 raise ValueError(f"Field '{widget.field_name}' is read-only.")
-            if widget.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
-                widget.field_value = widget.on_state() if value else "Off"
+            field_type = widget.field_type
+            on_value = widget.on_state() if field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX else None
+            self._record_change()
+            widget = next(item for item in self.doc[page_index].widgets() if item.xref == xref)
+            if field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
+                widget.field_value = on_value if value else "Off"
             else:
                 widget.field_value = value
             widget.update()
@@ -80,18 +144,34 @@ class PDFEngine:
         return False
 
     def rotate_page(self, page_index):
+        self._record_change()
         page = self.doc[page_index]
         page.set_rotation((page.rotation + 90) % 360)
 
     def move_page(self, page_index, destination_index):
+        self._record_change()
         self.doc.move_page(page_index, destination_index)
+        for signature in self.signatures:
+            page = signature["page"]
+            if page == page_index:
+                signature["page"] = destination_index
+            elif page_index < destination_index and page_index < page <= destination_index:
+                signature["page"] -= 1
+            elif destination_index < page_index and destination_index <= page < page_index:
+                signature["page"] += 1
 
     def delete_page(self, page_index):
         if len(self.doc) <= 1:
             raise ValueError("A PDF must contain at least one page.")
+        self._record_change()
         self.doc.delete_page(page_index)
+        self.signatures = [s for s in self.signatures if s["page"] != page_index]
+        for signature in self.signatures:
+            if signature["page"] > page_index:
+                signature["page"] -= 1
 
     def crop_page(self, page_index, coords):
+        self._record_change()
         page = self.doc[page_index]
         page.set_cropbox(fitz.Rect(coords))
 
@@ -99,8 +179,54 @@ class PDFEngine:
         rect = fitz.Rect(coords)
         if rect.width < 1 or rect.height < 1:
             raise ValueError("The signature area is too small.")
+        self._record_change()
         page = self.doc[page_index]
-        page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True)
+        image_bytes = self._make_unique_signature_image(image_bytes)
+        xref = page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True)
+        signature = {"id": uuid.uuid4().hex, "page": page_index, "rect": tuple(rect),
+                     "image": image_bytes, "xref": xref}
+        self.signatures.append(signature)
+        return signature["id"]
+
+    @staticmethod
+    def _make_unique_signature_image(image_bytes):
+        """Prevent MuPDF from reusing an image xref that an edit just blanked."""
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            unique_image = source.convert("RGBA")
+        marker = uuid.uuid4().bytes
+        _r, _g, _b, a = unique_image.getpixel((0, 0))
+        unique_image.putpixel((0, 0), (marker[0], marker[1], marker[2], a))
+        stream = io.BytesIO()
+        unique_image.save(stream, format="PNG")
+        return stream.getvalue()
+
+    def get_signatures(self, page_index):
+        return [copy.deepcopy(s) for s in self.signatures if s["page"] == page_index]
+
+    def update_signature(self, signature_id, coords):
+        rect = fitz.Rect(coords)
+        if rect.width < 1 or rect.height < 1:
+            raise ValueError("The signature area is too small.")
+        signature = next((s for s in self.signatures if s["id"] == signature_id), None)
+        if signature is None:
+            raise ValueError("The signature is no longer available.")
+        self._record_change()
+        page = self.doc[signature["page"]]
+        page.delete_image(signature["xref"])
+        signature["image"] = self._make_unique_signature_image(signature["image"])
+        signature["xref"] = page.insert_image(
+            rect, stream=signature["image"], keep_proportion=True, overlay=True,
+        )
+        signature["rect"] = tuple(rect)
+
+    def delete_signature(self, signature_id):
+        signature = next((s for s in self.signatures if s["id"] == signature_id), None)
+        if signature is None:
+            return False
+        self._record_change()
+        self.doc[signature["page"]].delete_image(signature["xref"])
+        self.signatures.remove(signature)
+        return True
 
     def get_text_in_rect(self, page_index, pdf_coords):
         page = self.doc[page_index]
@@ -118,6 +244,7 @@ class PDFEngine:
         return [pdf_coords]
 
     def add_highlight(self, page_index, rects, comment_text=""):
+        self._record_change()
         page = self.doc[page_index]
         user = getpass.getuser().upper()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -135,6 +262,9 @@ class PDFEngine:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for annot in page.annots():
             if annot.rect.contains(point):
+                self._record_change()
+                page = self.doc[page_index]
+                annot = next(a for a in page.annots() if a.rect.contains(point))
                 old_content = annot.info.get("content", "")
                 created_line = f"CREATED: {user} @ {ts}"
                 for line in old_content.split("\n"):
@@ -178,6 +308,9 @@ class PDFEngine:
         point = fitz.Point(pdf_coords)
         for annot in page.annots():
             if annot.rect.contains(point):
+                self._record_change()
+                page = self.doc[page_index]
+                annot = next(a for a in page.annots() if a.rect.contains(point))
                 page.delete_annot(annot)
                 return True
         return False
@@ -210,17 +343,30 @@ class PDFEngine:
             for source in sources:
                 source.close()
 
+        self._record_change()
         self.doc.close()
         self.doc = combined
 
-    def save_file(self, output_path):
+    def save_file(self, output_path, mark_saved=False):
         try:
             norm_output = os.path.normpath(output_path)
             source_name = self.doc.name
             norm_source = os.path.normpath(source_name) if source_name else None
             if norm_source and norm_output == norm_source:
                 self.doc.save(output_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+            elif norm_output == self.filepath and os.path.exists(output_path):
+                directory = os.path.dirname(os.path.abspath(output_path))
+                handle, temporary_path = tempfile.mkstemp(prefix=".pdf-suite-", suffix=".pdf", dir=directory)
+                os.close(handle)
+                try:
+                    self.doc.save(temporary_path, garbage=3, deflate=True)
+                    os.replace(temporary_path, output_path)
+                finally:
+                    if os.path.exists(temporary_path):
+                        os.remove(temporary_path)
             else:
                 self.doc.save(output_path)
+            if mark_saved:
+                self.mark_saved()
         except Exception as e:
             raise Exception(f"Save failed: {str(e)}")

@@ -3,6 +3,7 @@ name = "pdf-suite"
 version = "1.1.0"
 description = "Local Windows desktop application for reviewing and organizing PDF documents"
 requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
 dependencies = [
     "customtkinter>=5.2.0",
     "pillow>=10.0.0",

@@ -81,14 +81,14 @@ Text-snap highlighting groups extracted words by both PyMuPDF block and line ide
 
 ### User interface
 
-`MainWindow` owns the application workflow and connects the engine, canvas, sidebar, menus, dialogs, session state, and Details panel.
+`MainWindow` owns the application workflow and connects the engine, canvas, sidebar, menus, dialogs, session state, and More Actions panel.
 
 The main layout is:
 
 ```text
 Dark menu bar
-File, page, zoom, Details, and File Actions toolbar
-Thumbnail panel | Tool rail | PDF canvas | Details workspace
+File, page, zoom, and More Actions toolbar
+Thumbnail panel | Tool rail | PDF canvas | More Actions workspace
 Status bar
 ```
 
@@ -107,7 +107,7 @@ Layout decisions are isolated in `ui/layout.py`:
 - At 1180 pixels and above: wide layout.
 - Sidebar width is bounded from 176 through 360 pixels, with a default of 224 pixels.
 
-At narrower sizes, the toolbar wraps to two rows. Thumbnails and Details behave as temporary drawers so they do not compress the document canvas beyond usability.
+At narrower sizes, the toolbar wraps to two rows. Thumbnails and More Actions behave as temporary drawers so they do not compress the document canvas beyond usability.
 
 ## 6. Forms
 
@@ -173,6 +173,7 @@ The script:
 2. Synchronizes locked runtime and build dependencies.
 3. Runs PyInstaller in windowed, one-folder mode.
 4. Embeds the icon and collects CustomTkinter assets.
+5. Copies the license, README, and third-party notices into the release directory.
 
 Output:
 
@@ -201,16 +202,24 @@ Packaged visual verification:
 .\tests\visual_smoke.ps1 -PdfPath ".\sample.pdf"
 ```
 
-The smoke script launches the built executable and captures normal, Details, Forms, Sign, 800x600, and 1024x768 states. On July 20, 2026, the source tests, compilation, Windows build, and packaged visual smoke check all completed successfully.
+The smoke script launches the built executable and captures normal, Highlight, Crop, Details, Forms, Sign, 800x600, and 1024x768 states. On July 20, 2026, the source tests, compilation, Windows build, and packaged visual smoke check all completed successfully.
 
 The smoke script verifies launch and visible layout states; it does not automate every destructive edit or save workflow.
 
 ## 12. Known limitations
 
-- Undo and redo are not implemented.
-- Placed visual signatures cannot be selected, moved, or resized.
+- Document mutations are backed by in-memory PDF snapshots and support undo and redo.
+- Signatures placed during the current session can be selected, moved, resized, and deleted before saving.
 - Certificate-backed PDF signing and validation are not implemented.
 - Complex scripted forms, radio-group edge cases, and fields spanning pages require broader testing.
 - Thumbnail rendering is incremental but remains CPU work on the UI thread.
 - Automated GUI coverage is limited to screenshot-based smoke checks.
 - Distribution is a portable folder; there is no installer or automatic file-association registration.
+
+## 13. Licensing and source distribution
+
+PDF Suite is licensed under `AGPL-3.0-or-later`. The canonical terms are stored in the root `LICENSE` file and the package metadata declares the same SPDX expression.
+
+PyMuPDF is available under the GNU AGPL or a separate commercial Artifex license. This project uses it under the AGPL-compatible path. CustomTkinter and Pillow retain their permissive upstream licenses, summarized in `THIRD_PARTY_NOTICES.md`.
+
+When distributing a packaged executable, provide recipients equivalent access to the complete corresponding source for that exact build. Keep the source revision, `uv.lock`, `pyproject.toml`, PyInstaller build script, assets, license, and notices available alongside or clearly linked from the binary download.
