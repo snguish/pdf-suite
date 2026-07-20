@@ -15,6 +15,7 @@ class PDFCanvas(ctk.CTkCanvas):
         
         # Callbacks
         self.hover_callback = self.double_click_callback = self.right_click_callback = None
+        self.wheel_callback = None
 
         # Bindings
         self.bind("<ButtonPress-1>", self.on_left_click)
@@ -25,7 +26,7 @@ class PDFCanvas(ctk.CTkCanvas):
         self.bind("<ButtonRelease-3>", self.stop_pan)
         self.bind("<Double-Button-1>", self.on_double_click)
         self.bind("<Motion>", self.on_mouse_move)
-        self.bind("<MouseWheel>", lambda e: self.yview_scroll(int(-1*(e.delta/120)), "units"))
+        self.bind("<MouseWheel>", self.on_mouse_wheel)
 
     def display_page(self, img):
         """Forces a layout refresh to ensure the page is centered in the ACTUAL window space."""
@@ -85,3 +86,8 @@ class PDFCanvas(ctk.CTkCanvas):
         if self.hover_callback: self.hover_callback(self.canvasx(e.x), self.canvasy(e.y))
     def on_double_click(self, e):
         if self.double_click_callback: self.double_click_callback(self.canvasx(e.x), self.canvasy(e.y))
+
+    def on_mouse_wheel(self, e):
+        if self.wheel_callback:
+            self.wheel_callback(e)
+        return "break"

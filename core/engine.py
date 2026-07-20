@@ -9,6 +9,10 @@ class PDFEngine:
         fitz.TOOLS.mupdf_display_errors(False)
         self.doc = fitz.open(filepath)
 
+    def close(self):
+        if self.doc and not self.doc.is_closed:
+            self.doc.close()
+
     def get_display_page(self, page_index, zoom=1.0):
         page = self.doc[page_index]
         mat = fitz.Matrix(zoom, zoom)
@@ -25,6 +29,14 @@ class PDFEngine:
     def rotate_page(self, page_index):
         page = self.doc[page_index]
         page.set_rotation((page.rotation + 90) % 360)
+
+    def move_page(self, page_index, destination_index):
+        self.doc.move_page(page_index, destination_index)
+
+    def delete_page(self, page_index):
+        if len(self.doc) <= 1:
+            raise ValueError("A PDF must contain at least one page.")
+        self.doc.delete_page(page_index)
 
     def crop_page(self, page_index, coords):
         page = self.doc[page_index]
@@ -117,11 +129,34 @@ class PDFEngine:
         new_doc.save(output_path)
         new_doc.close()
 
+    def append_documents(self, filepaths):
+        """Append complete PDFs atomically, leaving the current document intact on failure."""
+        sources = []
+        combined = fitz.open()
+        try:
+            combined.insert_pdf(self.doc)
+            for filepath in filepaths:
+                source = fitz.open(filepath)
+                sources.append(source)
+                if source.needs_pass:
+                    raise ValueError(f"Password required: {os.path.basename(filepath)}")
+                combined.insert_pdf(source)
+        except Exception:
+            combined.close()
+            raise
+        finally:
+            for source in sources:
+                source.close()
+
+        self.doc.close()
+        self.doc = combined
+
     def save_file(self, output_path):
         try:
             norm_output = os.path.normpath(output_path)
-            norm_source = os.path.normpath(self.doc.name)
-            if norm_output == norm_source:
+            source_name = self.doc.name
+            norm_source = os.path.normpath(source_name) if source_name else None
+            if norm_source and norm_output == norm_source:
                 self.doc.save(output_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
             else:
                 self.doc.save(output_path)

@@ -8,6 +8,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from core.session import SessionManager
 from ui.main_window import MainWindow
 
+def resource_path(relative_path):
+    """Resolve resources both from source and from a PyInstaller bundle."""
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
 def main():
     # --- 1. GLOBAL UI SETTINGS ---
     ctk.set_appearance_mode("dark")
@@ -24,9 +29,10 @@ def main():
     
     # --- 3. SET WINDOW ICON (SAFE LOADING) ---
     # We check if the file exists first so the app doesn't crash if it's missing
-    if os.path.exists("app_icon.ico"):
+    icon_path = resource_path("app_icon.ico")
+    if os.path.exists(icon_path):
         try:
-            root.iconbitmap("app_icon.ico")
+            root.iconbitmap(icon_path)
         except Exception:
             # Silently skip if the icon format is invalid or locked
             pass

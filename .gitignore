@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+/.build-venv/
+/build/
+/dist/
+/*.spec

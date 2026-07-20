@@ -5,17 +5,14 @@
 
 ---
 
-### **1. Initial Setup**
-To ensure stability, the tool performs an automated setup:
-1.  Double-click **`Run_PDF_Suite.bat`**. 
-2.  **First Launch:** Will take ~60 seconds to create a private environment and sync libraries.
-3.  **Subsequent Launches:** Are nearly instantaneous, even when opening multiple PDF files simultaneously.
+### **1. Windows Build**
+Run **`build_windows.ps1`** from PowerShell to create a self-contained application folder. The executable is produced at **`dist\PDF Suite\PDF Suite.exe`** and does not require Python on the destination computer.
 
 ---
 
 ### **2. Desktop Integration**
-* **Double-Click to Open:** Right-click any `.pdf` > **Open with** > **Choose another app** > **Choose an app on your PC** > Select **`Run_PDF_Suite.bat`**.
-* **Set Professional Icon:** Right-click `Run_PDF_Suite.bat` > **Send to Desktop (shortcut)**. Right-click the shortcut > **Properties** > **Change Icon** > Browse to **`app_icon.ico`**.
+* **Double-Click to Open:** Right-click any `.pdf` > **Open with** > **Choose another app** > **Choose an app on your PC** > Select **`PDF Suite.exe`**.
+* **Desktop Shortcut:** Right-click `PDF Suite.exe` and choose **Send to Desktop (shortcut)**. The application icon is embedded in the executable.
 
 ---
 
@@ -26,6 +23,7 @@ Efficiency is the core of this tool. Fixed keyboard variations are supported for
 | :--- | :--- |
 | **`Up` / `Down`** | Previous / Next Page |
 | **`Mouse Wheel`** | **Page Navigation** (Scroll to change pages) |
+| **`Ctrl` + `Mouse Wheel`** | **Zoom at Pointer** (Keeps the pointed area in view) |
 | **`f`** | **Fit Page** (Frame entire page in window) |
 | **`b`** | **Reset View** (Return to 100% zoom) |
 | **`+` / `-`** | **Zoom In / Out** (Works on Numpad and Main keys) |

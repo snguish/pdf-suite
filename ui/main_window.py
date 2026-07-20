@@ -25,11 +25,13 @@ class MainWindow:
         self.root.grid_rowconfigure(1, weight=1)
 
         self.setup_ui()
+        self.root.protocol("WM_DELETE_WINDOW", self.close_window)
         self.root.after(100, self.bind_shortcuts)
         if initial_file:
             self.check_ready_and_load(initial_file)
 
     def setup_ui(self):
+        self.setup_menu()
         # --- RIBBON ---
         self.ribbon = ctk.CTkFrame(self.root, height=50, corner_radius=0, border_width=1, border_color="#333333")
         self.ribbon.grid(row=0, column=0, columnspan=4, sticky="ew")
@@ -111,22 +113,59 @@ class MainWindow:
         self.canvas.hover_callback = self.handle_hover
         self.canvas.double_click_callback = self.handle_double_click
         self.canvas.right_click_callback = self.handle_right_click
+        self.canvas.wheel_callback = self.handle_canvas_wheel
         self.status_label = ctk.CTkLabel(self.root, text=" Ready", anchor="w", height=25, fg_color="#1a1a1a")
         self.status_label.grid(row=2, column=0, columnspan=4, sticky="ew")
+
+    def setup_menu(self):
+        menu_bar = Menu(self.root)
+
+        file_menu = Menu(menu_bar, tearoff=0)
+        file_menu.add_command(label="Open PDF...", accelerator="Ctrl+O", command=self.open_file)
+        file_menu.add_separator()
+        file_menu.add_command(label="Save", accelerator="Ctrl+S", command=self.save_overwrite)
+        file_menu.add_command(label="Save Copy as...", accelerator="Ctrl+Shift+S", command=self.export_pdf)
+        file_menu.add_command(label="Export Notes...", accelerator="Ctrl+E", command=self.export_comments)
+        file_menu.add_separator()
+        file_menu.add_command(label="Close", command=self.close_window)
+        menu_bar.add_cascade(label="File", menu=file_menu)
+
+        pages_menu = Menu(menu_bar, tearoff=0)
+        pages_menu.add_command(label="Combine PDFs...", command=self.combine_pdfs)
+        pages_menu.add_command(label="Extract Pages...", command=self.toggle_extraction_mode)
+        menu_bar.add_cascade(label="Pages", menu=pages_menu)
+
+        view_menu = Menu(menu_bar, tearoff=0)
+        view_menu.add_command(label="Zoom In", accelerator="+", command=lambda: self.adjust_zoom(0.1))
+        view_menu.add_command(label="Zoom Out", accelerator="-", command=lambda: self.adjust_zoom(-0.1))
+        view_menu.add_command(label="Actual Size", accelerator="Ctrl+1", command=self.reset_zoom)
+        view_menu.add_command(label="Fit Page", accelerator="Ctrl+0", command=self.zoom_to_fit)
+        view_menu.add_separator()
+        view_menu.add_command(label="Toggle Thumbnails", accelerator="S", command=self.toggle_sidebar)
+        menu_bar.add_cascade(label="View", menu=view_menu)
+
+        self.root.configure(menu=menu_bar)
 
     # --- UPDATED KEYBOARD SHORTCUTS ---
     def bind_shortcuts(self):
         """Maps keys to functions. Fixed '+' binding for keypad and standard keys."""
-        self.root.bind("<Up>", lambda e: self.prev_page())
-        self.root.bind("<Down>", lambda e: self.next_page())
+        self.root.bind("<Up>", lambda e: self.run_shortcut(e, self.prev_page))
+        self.root.bind("<Down>", lambda e: self.run_shortcut(e, self.next_page))
+        self.root.bind("<Prior>", lambda e: self.run_shortcut(e, self.prev_page))
+        self.root.bind("<Next>", lambda e: self.run_shortcut(e, self.next_page))
         self.root.bind("<MouseWheel>", self.handle_scroll)
-        self.root.bind("<f>", lambda e: self.zoom_to_fit())
-        self.root.bind("<b>", lambda e: self.reset_zoom())
-        self.root.bind("<s>", lambda e: self.toggle_sidebar())
-        self.root.bind("<h>", lambda e: self.toggle_highlight_mode())
-        self.root.bind("<c>", lambda e: self.toggle_crop_mode())
+        self.root.bind("<f>", lambda e: self.run_shortcut(e, self.zoom_to_fit))
+        self.root.bind("<b>", lambda e: self.run_shortcut(e, self.reset_zoom))
+        self.root.bind("<s>", lambda e: self.run_shortcut(e, self.toggle_sidebar))
+        self.root.bind("<h>", lambda e: self.run_shortcut(e, self.toggle_highlight_mode))
+        self.root.bind("<c>", lambda e: self.run_shortcut(e, self.toggle_crop_mode))
+        self.root.bind("<Escape>", lambda e: self.cancel_active_tool())
+        self.root.bind("<Control-o>", lambda e: self.open_file())
         self.root.bind("<Control-e>", lambda e: self.export_comments())
         self.root.bind("<Control-s>", lambda e: self.save_overwrite())
+        self.root.bind("<Control-Shift-S>", lambda e: self.export_pdf())
+        self.root.bind("<Control-Key-0>", lambda e: self.zoom_to_fit())
+        self.root.bind("<Control-Key-1>", lambda e: self.reset_zoom())
 
         # Zoom In (+) variations
         self.root.bind("<plus>", lambda e: self.adjust_zoom(0.1))    # Numpad + or Shifted =
@@ -137,14 +176,65 @@ class MainWindow:
         self.root.bind("<minus>", lambda e: self.adjust_zoom(-0.1))
         self.root.bind("<KP_Subtract>", lambda e: self.adjust_zoom(-0.1))
 
+    def run_shortcut(self, event, callback):
+        """Do not trigger single-key document shortcuts while the user types."""
+        widget_class = event.widget.winfo_class()
+        if widget_class in {"Entry", "Text", "TEntry", "TCombobox", "Spinbox"}:
+            return None
+        callback()
+        return "break"
+
+    def cancel_active_tool(self):
+        if self.highlight_btn.cget("text") == "Cancel Highlight":
+            self.toggle_highlight_mode()
+        elif self.crop_btn.cget("text") == "Cancel Crop":
+            self.toggle_crop_mode()
+        elif self.extraction_mode:
+            self.toggle_extraction_mode()
+
     # --- COORDINATE & VIEW LOGIC ---
     def reset_zoom(self):
         self.current_zoom = 1.0
         self.update_zoom_view()
 
     def adjust_zoom(self, d):
-        self.current_zoom += d
+        self.current_zoom = max(0.1, min(8.0, self.current_zoom + d))
         self.update_zoom_view()
+
+    def zoom_at_pointer(self, delta, widget_x, widget_y):
+        """Zoom while keeping the PDF location under the pointer stationary."""
+        if not self.engine:
+            return
+
+        old_zoom = self.current_zoom
+        new_zoom = max(0.1, min(8.0, old_zoom + delta))
+        if new_zoom == old_zoom:
+            return
+
+        old_canvas_x = self.canvas.canvasx(widget_x)
+        old_canvas_y = self.canvas.canvasy(widget_y)
+        pdf_x, pdf_y = self.get_pdf_coords(old_canvas_x, old_canvas_y)
+
+        self.current_zoom = new_zoom
+        self.zoom_label.configure(text=f"{int(new_zoom * 100)}%")
+        self.load_page(self.current_page_index)
+        self.canvas.update_idletasks()
+
+        page = self.engine.doc[self.current_page_index]
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        rendered_w = page.rect.width * new_zoom
+        rendered_h = page.rect.height * new_zoom
+        region_w = max(cw, rendered_w)
+        region_h = max(ch, rendered_h)
+        offset_x = (region_w - rendered_w) / 2
+        offset_y = (region_h - rendered_h) / 2
+
+        target_x = offset_x + pdf_x * new_zoom
+        target_y = offset_y + pdf_y * new_zoom
+        if region_w > cw:
+            self.canvas.xview_moveto(max(0.0, min(1.0, (target_x - widget_x) / region_w)))
+        if region_h > ch:
+            self.canvas.yview_moveto(max(0.0, min(1.0, (target_y - widget_y) / region_h)))
 
     def get_pdf_coords(self, cx, cy):
         if not self.engine: return 0, 0
@@ -206,6 +296,7 @@ class MainWindow:
         if self.active_note_coord and self.engine:
             new_text = self.inspector_text.get("1.0", "end-1c")
             self.engine.update_comment_at_pos(self.current_page_index, self.active_note_coord, new_text)
+            self.mark_document_changed()
             self.load_page(self.current_page_index)
 
     # --- ANNOTATION MODES ---
@@ -217,6 +308,7 @@ class MainWindow:
             rect = (min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1]))
             rects = self.engine.get_text_in_rect(self.current_page_index, rect) if self.snap_var.get() else [rect]
             self.engine.add_highlight(self.current_page_index, rects)
+            self.mark_document_changed()
             self.load_page(self.current_page_index); self.sidebar.refresh_thumbnail(self.current_page_index)
             self.focus_note_in_inspector(rect[:2]); self.toggle_highlight_mode()
 
@@ -248,6 +340,7 @@ class MainWindow:
             p1, p2 = self.get_pdf_coords(px[0], px[1]), self.get_pdf_coords(px[2], px[3])
             rect = (min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1]))
             self.engine.crop_page(self.current_page_index, rect)
+            self.mark_document_changed()
             self.toggle_crop_mode(); self.zoom_to_fit()
             self.sidebar.refresh_thumbnail(self.current_page_index)
 
@@ -264,13 +357,55 @@ class MainWindow:
 
     def open_file(self):
         p = filedialog.askopenfilename(filetypes=[("PDF", "*.pdf")])
-        if p: self.load_external_file(p)
+        if p and self.confirm_discard_changes():
+            self.load_external_file(p)
 
     def load_external_file(self, path):
         if path and os.path.exists(path):
-            self.current_file_path = path; self.clear_nav_area(); self.engine = PDFEngine(path)
-            self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page)
+            try:
+                new_engine = PDFEngine(path)
+            except Exception as exc:
+                messagebox.showerror("Open Error", f"Could not open the PDF:\n{exc}")
+                return
+
+            old_engine = self.engine
+            self.clear_nav_area()
+            self.engine = new_engine
+            if old_engine:
+                old_engine.close()
+            self.current_file_path = path
+            self.session.reset()
+            self.update_window_title()
+            self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
             self.sidebar.pack(expand=True, fill="both", pady=5); self.zoom_to_fit(); self.load_page(0)
+
+    def combine_pdfs(self):
+        paths = list(filedialog.askopenfilenames(
+            title="Select PDFs to append",
+            filetypes=[("PDF", "*.pdf")],
+        ))
+        if not paths:
+            return
+
+        if not self.engine:
+            first, paths = paths[0], paths[1:]
+            self.load_external_file(first)
+            if not self.engine or not paths:
+                return
+
+        try:
+            self.engine.append_documents(paths)
+        except Exception as exc:
+            messagebox.showerror("Combine Error", f"Could not combine the selected PDFs:\n{exc}")
+            return
+
+        current_page = min(self.current_page_index, len(self.engine.doc) - 1)
+        self.clear_nav_area()
+        self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
+        self.sidebar.pack(expand=True, fill="both", pady=5)
+        self.mark_document_changed()
+        self.load_page(current_page)
+        self.status_label.configure(text=f" Combined document: {len(self.engine.doc)} pages")
 
     def spawn_new_window(self):
         from core.session import SessionManager
@@ -292,6 +427,11 @@ class MainWindow:
     def handle_scroll(self, e):
         if e.delta > 0: self.prev_page()
         else: self.next_page()
+    def handle_canvas_wheel(self, e):
+        if e.state & 0x0004:
+            self.zoom_at_pointer(0.1 if e.delta > 0 else -0.1, e.x, e.y)
+        else:
+            self.handle_scroll(e)
     def zoom_to_fit(self):
         if not self.engine: return
         self.root.update(); cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
@@ -302,10 +442,22 @@ class MainWindow:
         if self.engine: self.zoom_label.configure(text=f"{int(self.current_zoom*100)}%"); self.load_page(self.current_page_index)
     def save_overwrite(self):
         if self.engine and self.current_file_path:
-            if messagebox.askyesno("Confirm", "Update original file?"): self.engine.save_file(self.current_file_path)
+            if messagebox.askyesno("Confirm", "Update original file?"):
+                try:
+                    self.engine.save_file(self.current_file_path)
+                    self.session.mark_saved()
+                    self.update_window_title()
+                    self.status_label.configure(text=" Changes saved")
+                except Exception as exc:
+                    messagebox.showerror("Save Error", str(exc))
     def export_pdf(self):
         path = filedialog.asksaveasfilename(defaultextension=".pdf")
-        if path: self.engine.save_file(path)
+        if path:
+            try:
+                self.engine.save_file(path)
+                self.status_label.configure(text=f" Copy saved: {os.path.basename(path)}")
+            except Exception as exc:
+                messagebox.showerror("Save Error", str(exc))
     def export_comments(self):
         if not self.engine: return
         d = self.engine.get_all_comments()
@@ -328,7 +480,10 @@ class MainWindow:
         if self.engine.get_comment_at_pos(self.current_page_index, coords):
             m = Menu(self.root, tearoff=0); m.add_command(label="Delete Note", command=lambda: self.confirm_delete(coords)); m.post(rx, ry)
     def confirm_delete(self, c):
-        if self.engine.delete_highlight(self.current_page_index, c): self.load_page(self.current_page_index); self.sidebar.refresh_thumbnail(self.current_page_index)
+        if self.engine.delete_highlight(self.current_page_index, c):
+            self.mark_document_changed()
+            self.load_page(self.current_page_index)
+            self.sidebar.refresh_thumbnail(self.current_page_index)
     def toggle_extraction_mode(self):
         self.extraction_mode = not self.extraction_mode
         if self.extraction_mode:
@@ -393,7 +548,61 @@ class MainWindow:
                 self.sidebar.select_range(valid)
         except ValueError:
             messagebox.showerror("Range Error", "Invalid format. Use values like 1-5, 10.")
-    def rotate_page(self, idx): self.engine.rotate_page(idx); self.sidebar.refresh_thumbnail(idx); self.load_page(idx) if idx == self.current_page_index else None
+    def rotate_page(self, idx):
+        self.engine.rotate_page(idx)
+        self.mark_document_changed()
+        self.sidebar.refresh_thumbnail(idx)
+        if idx == self.current_page_index:
+            self.load_page(idx)
+
+    def handle_page_action(self, action, idx):
+        if not self.engine:
+            return
+        if action == "delete":
+            if not messagebox.askyesno("Delete Page", f"Delete page {idx + 1}?"):
+                return
+            try:
+                self.engine.delete_page(idx)
+            except ValueError as exc:
+                messagebox.showwarning("Delete Page", str(exc))
+                return
+            target = min(idx, len(self.engine.doc) - 1)
+        else:
+            target = idx - 1 if action == "up" else idx + 1
+            self.engine.move_page(idx, target)
+
+        self.clear_nav_area()
+        self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
+        self.sidebar.pack(expand=True, fill="both", pady=5)
+        self.current_page_index = target
+        self.mark_document_changed()
+        self.load_page(target)
+
+    def mark_document_changed(self):
+        self.session.mark_changed()
+        self.update_window_title()
+
+    def update_window_title(self):
+        name = os.path.basename(self.current_file_path) if self.current_file_path else "PDF Suite"
+        marker = " *" if self.session.unsaved_changes else ""
+        self.root.title(f"{name}{marker} - PDF Suite")
+
+    def confirm_discard_changes(self):
+        if not self.session.unsaved_changes:
+            return True
+        return messagebox.askyesno(
+            "Unsaved Changes",
+            "This document has unsaved changes. Discard them?",
+        )
+
+    def close_window(self):
+        if not self.confirm_discard_changes():
+            return
+        if self.sidebar:
+            self.sidebar.stop_loading()
+        if self.engine:
+            self.engine.close()
+        self.root.destroy()
     def clear_nav_area(self):
         if self.sidebar: self.sidebar.stop_loading()
         for c in self.nav_container.winfo_children(): c.destroy()

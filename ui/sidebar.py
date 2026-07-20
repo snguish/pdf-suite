@@ -3,12 +3,13 @@ import threading
 from tkinter import Menu
 
 class Sidebar(ctk.CTkScrollableFrame):
-    def __init__(self, master, engine, select_callback, rotate_callback, **kwargs):
+    def __init__(self, master, engine, select_callback, rotate_callback, page_action_callback=None, **kwargs):
         # We use width 280 to accommodate the new checkboxes
         super().__init__(master, width=280, label_text="Page Navigation", **kwargs)
         self.engine = engine
         self.select_callback = select_callback
         self.rotate_callback = rotate_callback
+        self.page_action_callback = page_action_callback
         
         self.is_running = True
         self.extraction_mode = False 
@@ -120,4 +121,10 @@ class Sidebar(ctk.CTkScrollableFrame):
     def show_context_menu(self, event, idx):
         m = Menu(self, tearoff=0)
         m.add_command(label="Rotate 90°", command=lambda: self.rotate_callback(idx))
+        if self.page_action_callback:
+            m.add_separator()
+            m.add_command(label="Move Page Up", command=lambda: self.page_action_callback("up", idx), state="normal" if idx > 0 else "disabled")
+            m.add_command(label="Move Page Down", command=lambda: self.page_action_callback("down", idx), state="normal" if idx < len(self.engine.doc) - 1 else "disabled")
+            m.add_separator()
+            m.add_command(label="Delete Page", command=lambda: self.page_action_callback("delete", idx))
         m.post(event.x_root, event.y_root)
