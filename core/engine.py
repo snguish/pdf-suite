@@ -95,6 +95,13 @@ class PDFEngine:
         page = self.doc[page_index]
         page.set_cropbox(fitz.Rect(coords))
 
+    def add_signature_image(self, page_index, coords, image_bytes):
+        rect = fitz.Rect(coords)
+        if rect.width < 1 or rect.height < 1:
+            raise ValueError("The signature area is too small.")
+        page = self.doc[page_index]
+        page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True)
+
     def get_text_in_rect(self, page_index, pdf_coords):
         page = self.doc[page_index]
         words = page.get_text("words", clip=fitz.Rect(pdf_coords))

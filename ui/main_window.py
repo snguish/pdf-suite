@@ -1,6 +1,7 @@
 import customtkinter as ctk
-import csv, os
+import csv, io, os
 from tkinter import filedialog, messagebox, Menu
+from PIL import Image, ImageDraw, ImageFont
 from core.engine import PDFEngine
 from ui.sidebar import Sidebar
 from ui.canvas import PDFCanvas
@@ -18,6 +19,7 @@ class MainWindow:
         self.current_page_index = 0  
         self.extraction_mode = False
         self.active_note_coord = None 
+        self.pending_signature_bytes = None
         self.form_controls = {}
         self._forms_page_index = None
 
@@ -123,12 +125,38 @@ class MainWindow:
         self.save_note_btn.configure(state="disabled")
         self.forms_content = ctk.CTkScrollableFrame(self.forms_tab, fg_color="transparent")
         self.forms_content.pack(expand=True, fill="both")
-        ctk.CTkLabel(self.sign_tab, text="Visual signature tools will appear here\nin the next editing milestone.", text_color="#aaaaaa", justify="center").pack(expand=True, padx=12)
+        ctk.CTkLabel(
+            self.sign_tab,
+            text="VISUAL SIGNATURE",
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", padx=8, pady=(8, 2))
+        ctk.CTkLabel(
+            self.sign_tab,
+            text="Placed signatures become permanent page content.\nThey are not certificate-backed digital signatures.",
+            text_color="#aaaaaa",
+            justify="left",
+            wraplength=240,
+        ).pack(anchor="w", padx=8, pady=(0, 12))
+        ctk.CTkButton(self.sign_tab, text="Import Signature Image...", command=self.choose_signature_image).pack(fill="x", padx=8, pady=4)
+        ctk.CTkButton(self.sign_tab, text="Draw Signature...", command=self.open_signature_pad).pack(fill="x", padx=8, pady=4)
+        ctk.CTkLabel(self.sign_tab, text="Typed signature", anchor="w").pack(fill="x", padx=8, pady=(14, 2))
+        self.typed_signature_entry = ctk.CTkEntry(self.sign_tab, placeholder_text="Enter signer name")
+        self.typed_signature_entry.pack(fill="x", padx=8, pady=2)
+        ctk.CTkButton(self.sign_tab, text="Place Typed Signature", command=self.prepare_typed_signature).pack(fill="x", padx=8, pady=4)
+        self.signature_status = ctk.CTkLabel(
+            self.sign_tab,
+            text="Choose a signature, then drag its area on the page.",
+            text_color="#aaaaaa",
+            justify="left",
+            wraplength=240,
+        )
+        self.signature_status.pack(anchor="w", padx=8, pady=14)
 
         self.canvas.hover_callback = self.handle_hover
         self.canvas.double_click_callback = self.handle_double_click
         self.canvas.right_click_callback = self.handle_right_click
         self.canvas.wheel_callback = self.handle_canvas_wheel
+        self.canvas.selection_callback = self.handle_selection_release
         self.status_label = ctk.CTkLabel(self.root, text=" Ready", anchor="w", height=25, fg_color="#1a1a1a")
         self.status_label.grid(row=2, column=0, columnspan=4, sticky="ew")
 
@@ -207,6 +235,8 @@ class MainWindow:
             self.toggle_highlight_mode()
         elif self.crop_btn.cget("text") == "Cancel Crop":
             self.toggle_crop_mode()
+        elif self.canvas.signature_mode:
+            self.cancel_signature_placement()
         elif self.extraction_mode:
             self.toggle_extraction_mode()
 
@@ -447,7 +477,167 @@ class MainWindow:
             self.context_tabs.set("Forms")
             self.status_label.configure(text=f" Updated {updated} form field(s)")
 
+    # --- VISUAL SIGNATURES ---
+    def choose_signature_image(self):
+        path = filedialog.askopenfilename(
+            title="Choose Signature Image",
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp")],
+        )
+        if not path:
+            return
+        try:
+            with Image.open(path) as image:
+                signature = image.convert("RGBA")
+                signature.thumbnail((1600, 600), Image.Resampling.LANCZOS)
+                stream = io.BytesIO()
+                signature.save(stream, format="PNG")
+            self.prepare_signature(stream.getvalue(), os.path.basename(path))
+        except Exception as exc:
+            messagebox.showerror("Signature Error", f"Could not read the signature image:\n{exc}")
+
+    def prepare_typed_signature(self):
+        text = self.typed_signature_entry.get().strip()
+        if not text:
+            messagebox.showinfo("Typed Signature", "Enter the signer name first.")
+            return
+        try:
+            font = None
+            for font_path in (
+                r"C:\Windows\Fonts\segoesc.ttf",
+                r"C:\Windows\Fonts\ariali.ttf",
+            ):
+                if os.path.exists(font_path):
+                    font = ImageFont.truetype(font_path, 72)
+                    break
+            if font is None:
+                font = ImageFont.load_default()
+            probe = Image.new("RGBA", (1, 1), (255, 255, 255, 0))
+            bounds = ImageDraw.Draw(probe).textbbox((0, 0), text, font=font, stroke_width=1)
+            width = max(20, bounds[2] - bounds[0] + 20)
+            height = max(20, bounds[3] - bounds[1] + 20)
+            signature = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+            ImageDraw.Draw(signature).text((10 - bounds[0], 10 - bounds[1]), text, fill=(20, 40, 90, 255), font=font, stroke_width=1)
+            stream = io.BytesIO()
+            signature.save(stream, format="PNG")
+            self.prepare_signature(stream.getvalue(), f"Typed: {text}")
+        except Exception as exc:
+            messagebox.showerror("Signature Error", f"Could not create the typed signature:\n{exc}")
+
+    def open_signature_pad(self):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Draw Signature")
+        dialog.geometry("680x300")
+        dialog.transient(self.root)
+        strokes = []
+        active_stroke = []
+        pad = ctk.CTkCanvas(dialog, width=640, height=190, bg="white", highlightthickness=1, highlightbackground="#777777")
+        pad.pack(fill="both", expand=True, padx=20, pady=(20, 8))
+
+        def start_stroke(event):
+            active_stroke.clear()
+            active_stroke.append((event.x, event.y))
+            strokes.append(active_stroke.copy())
+
+        def draw_stroke(event):
+            if not active_stroke:
+                return
+            previous = active_stroke[-1]
+            active_stroke.append((event.x, event.y))
+            strokes[-1] = active_stroke.copy()
+            pad.create_line(previous[0], previous[1], event.x, event.y, fill="#14285a", width=3, capstyle="round", smooth=True)
+
+        def clear_pad():
+            strokes.clear()
+            active_stroke.clear()
+            pad.delete("all")
+
+        def use_drawing():
+            if not strokes:
+                messagebox.showinfo("Draw Signature", "Draw a signature first.", parent=dialog)
+                return
+            width = max(1, pad.winfo_width())
+            height = max(1, pad.winfo_height())
+            signature = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+            drawing = ImageDraw.Draw(signature)
+            for stroke in strokes:
+                if len(stroke) == 1:
+                    x, y = stroke[0]
+                    drawing.ellipse((x - 2, y - 2, x + 2, y + 2), fill=(20, 40, 90, 255))
+                elif len(stroke) > 1:
+                    drawing.line(stroke, fill=(20, 40, 90, 255), width=4, joint="curve")
+            bbox = signature.getbbox()
+            if bbox:
+                signature = signature.crop(bbox)
+            stream = io.BytesIO()
+            signature.save(stream, format="PNG")
+            dialog.destroy()
+            self.prepare_signature(stream.getvalue(), "Drawn signature")
+
+        pad.bind("<ButtonPress-1>", start_stroke)
+        pad.bind("<B1-Motion>", draw_stroke)
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=(0, 14))
+        ctk.CTkButton(buttons, text="Clear", fg_color="#555555", command=clear_pad).pack(side="left")
+        ctk.CTkButton(buttons, text="Use Signature", fg_color="#28a745", command=use_drawing).pack(side="right")
+        dialog.grab_set()
+
+    def prepare_signature(self, image_bytes, description):
+        if not self.engine:
+            messagebox.showinfo("Visual Signature", "Open a PDF before placing a signature.")
+            return
+        if self.highlight_btn.cget("text") == "Cancel Highlight":
+            self.toggle_highlight_mode()
+        if self.crop_btn.cget("text") == "Cancel Crop":
+            self.toggle_crop_mode()
+        self.pending_signature_bytes = image_bytes
+        self.canvas.set_modes(signature=True)
+        self.context_tabs.set("Sign")
+        self.show_inspector()
+        self.signature_status.configure(text=f"Ready: {description}\nDrag a rectangle on the page. Press Esc to cancel.", text_color="#2f9bff")
+
+    def cancel_signature_placement(self):
+        self.pending_signature_bytes = None
+        self.canvas.set_modes(signature=False)
+        self.signature_status.configure(text="Choose a signature, then drag its area on the page.", text_color="#aaaaaa")
+
+    def apply_signature(self):
+        if not self.canvas.signature_mode or not self.pending_signature_bytes or not self.engine:
+            return
+        pixels = self.canvas.get_selection_pixels()
+        if not pixels:
+            return
+        p1 = self.get_pdf_coords(pixels[0], pixels[1])
+        p2 = self.get_pdf_coords(pixels[2], pixels[3])
+        page_rect = self.engine.doc[self.current_page_index].rect
+        rect = (
+            max(page_rect.x0, min(p1[0], p2[0])),
+            max(page_rect.y0, min(p1[1], p2[1])),
+            min(page_rect.x1, max(p1[0], p2[0])),
+            min(page_rect.y1, max(p1[1], p2[1])),
+        )
+        if rect[2] - rect[0] < 10 or rect[3] - rect[1] < 10:
+            messagebox.showwarning("Visual Signature", "Drag a larger signature area.")
+            return
+        try:
+            self.engine.add_signature_image(self.current_page_index, rect, self.pending_signature_bytes)
+        except Exception as exc:
+            messagebox.showerror("Signature Error", f"Could not place the signature:\n{exc}")
+            return
+        self.mark_document_changed()
+        self.cancel_signature_placement()
+        self.load_page(self.current_page_index)
+        if self.sidebar:
+            self.sidebar.refresh_thumbnail(self.current_page_index)
+        self.context_tabs.set("Sign")
+        self.status_label.configure(text=" Visual signature placed")
+
     # --- ANNOTATION MODES ---
+    def handle_selection_release(self, event):
+        if self.canvas.highlight_mode:
+            self.apply_highlight(event)
+        elif self.canvas.signature_mode:
+            self.apply_signature()
+
     def apply_highlight(self, event):
         if not self.canvas.highlight_mode: return
         px = self.canvas.get_selection_pixels()
@@ -462,18 +652,18 @@ class MainWindow:
 
     def toggle_highlight_mode(self):
         if self.crop_btn.cget("text") == "Cancel Crop": self.toggle_crop_mode()
+        if self.canvas.signature_mode: self.cancel_signature_placement()
         is_on = self.highlight_btn.cget("text") == "Cancel Highlight"
         if not is_on:
             self.highlight_btn.configure(text="Cancel Highlight", fg_color="#d39e00")
             self.snap_switch.pack(side="left", padx=10); self.canvas.set_modes(highlight=True)
-            self.canvas.bind("<ButtonRelease-1>", self.apply_highlight, add="+")
         else:
             self.highlight_btn.configure(text="Highlight", fg_color="#4a4a4a")
             self.snap_switch.pack_forget(); self.canvas.set_modes(highlight=False)
-            self.canvas.unbind("<ButtonRelease-1>")
 
     def toggle_crop_mode(self):
         if self.highlight_btn.cget("text") == "Cancel Highlight": self.toggle_highlight_mode()
+        if self.canvas.signature_mode: self.cancel_signature_placement()
         is_on = self.crop_btn.cget("text") == "Cancel Crop"
         if not is_on:
             self.crop_btn.configure(text="Cancel Crop", fg_color="#d35b5b")
@@ -527,6 +717,7 @@ class MainWindow:
             self.current_file_path = path
             self.session.reset()
             self._forms_page_index = None
+            self.cancel_signature_placement()
             self.update_window_title()
             self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
             self.sidebar.pack(expand=True, fill="both", pady=5); self.zoom_to_fit(); self.load_page(0)

@@ -11,11 +11,12 @@ class PDFCanvas(ctk.CTkCanvas):
         self.start_x = self.start_y = 0
         self._pan_start_x = self._pan_start_y = 0
         self.selection_rect_id = None
-        self.crop_mode = self.highlight_mode = False
+        self.crop_mode = self.highlight_mode = self.signature_mode = False
         
         # Callbacks
         self.hover_callback = self.double_click_callback = self.right_click_callback = None
         self.wheel_callback = None
+        self.selection_callback = None
 
         # Bindings
         self.bind("<ButtonPress-1>", self.on_left_click)
@@ -46,16 +47,16 @@ class PDFCanvas(ctk.CTkCanvas):
         self.config(scrollregion=(0, 0, max(cw, iw), max(ch, ih)))
         self.image_id = self.create_image(pos_x, pos_y, anchor="center", image=self.tk_image)
 
-    def set_modes(self, crop=False, highlight=False):
-        self.crop_mode, self.highlight_mode = crop, highlight
-        self.config(cursor="cross" if crop else "pencil" if highlight else "")
+    def set_modes(self, crop=False, highlight=False, signature=False):
+        self.crop_mode, self.highlight_mode, self.signature_mode = crop, highlight, signature
+        self.config(cursor="cross" if crop or signature else "pencil" if highlight else "")
         self.clear_selection()
 
     def on_left_click(self, e):
-        if not (self.crop_mode or self.highlight_mode): return
+        if not (self.crop_mode or self.highlight_mode or self.signature_mode): return
         self.start_x, self.start_y = self.canvasx(e.x), self.canvasy(e.y)
         self.clear_selection()
-        color = "red" if self.crop_mode else "#FFD700"
+        color = "red" if self.crop_mode else "#2f9bff" if self.signature_mode else "#FFD700"
         self.selection_rect_id = self.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline=color, width=2, dash=(4,4))
 
     def on_left_drag(self, e):
@@ -64,6 +65,8 @@ class PDFCanvas(ctk.CTkCanvas):
 
     def on_left_release(self, e):
         self.end_x, self.end_y = self.canvasx(e.x), self.canvasy(e.y)
+        if self.selection_callback:
+            self.selection_callback(e)
 
     def clear_selection(self):
         if self.selection_rect_id: self.delete(self.selection_rect_id); self.selection_rect_id = None
@@ -78,7 +81,7 @@ class PDFCanvas(ctk.CTkCanvas):
 
     def do_pan(self, e): self.scan_dragto(e.x, e.y, gain=1)
     def stop_pan(self, e):
-        self.config(cursor="cross" if self.crop_mode else "pencil" if self.highlight_mode else "")
+        self.config(cursor="cross" if self.crop_mode or self.signature_mode else "pencil" if self.highlight_mode else "")
         if ((e.x - self._pan_start_x)**2 + (e.y - self._pan_start_y)**2)**0.5 < 5:
             if self.right_click_callback: self.right_click_callback(self.canvasx(e.x), self.canvasy(e.y), e.x_root, e.y_root)
 

@@ -12,7 +12,7 @@ PDF Suite is a local desktop application for reviewing and organizing PDF docume
 
 All document processing is local. The application does not upload PDFs, annotations, signatures, or user information to a remote service.
 
-Interactive AcroForm filling is implemented for text fields, checkboxes, radio buttons, combo boxes, and list boxes. Visual signatures are planned for the next implementation milestone. Certificate-backed cryptographic signing is a separate advanced capability and is not currently implemented.
+Interactive AcroForm filling is implemented for text fields, checkboxes, radio buttons, combo boxes, and list boxes. Visual signatures can be imported, typed, or drawn and placed as flattened page content. Certificate-backed cryptographic signing is a separate advanced capability and is not currently implemented.
 
 ## 2. Technology stack
 
@@ -73,6 +73,7 @@ The window title contains an asterisk when changes are unsaved. Opening another 
 
 - Rendering full pages and thumbnails.
 - Detecting interactive form widgets and updating their values by PDF cross-reference ID.
+- Inserting visual signatures as proportionally fitted page images.
 - Rotating, cropping, moving, deleting, and extracting pages.
 - Atomically combining the active document with additional PDFs.
 - Creating, reading, editing, deleting, and exporting highlight notes.
@@ -95,7 +96,7 @@ Thumbnail panel | Document canvas | Contextual Details workspace
 Status bar
 ```
 
-The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the annotation workflow. Forms dynamically displays widgets found on the current PDF page. Sign reserves a stable location for the next editing milestone and is explicitly labeled as upcoming rather than presenting inactive controls as a complete feature.
+The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the annotation workflow. Forms dynamically displays widgets found on the current PDF page. Sign creates and places visual signatures while clearly distinguishing them from certificate-backed signatures.
 
 The Forms tab maps PDF widget types to native controls:
 
@@ -107,6 +108,16 @@ The Forms tab maps PDF widget types to native controls:
 - Certificate signature fields are identified but cannot be edited by the form workflow.
 
 Controls are cached while the current page is rerendered, preventing zoom changes from discarding unsubmitted entry text. **Apply Form Changes** writes the visible controls to PyMuPDF widgets, rerenders the page, and marks the document unsaved.
+
+The Sign tab supports three visual-signature sources:
+
+- Imported PNG, JPEG, or BMP images, normalized to PNG before insertion.
+- Typed signer names rendered with an available Windows handwriting or italic font.
+- Mouse-drawn strokes captured in a dedicated signature pad and converted to a cropped transparent PNG.
+
+After choosing a signature, the canvas enters signature-placement mode. The user drags a rectangle that defines its location and maximum size. Coordinates are clamped to the visible PDF page, and undersized rectangles are rejected. PyMuPDF inserts the image with its aspect ratio preserved and marks the document unsaved. Pressing Escape cancels placement.
+
+Placed visual signatures are permanent page image content. They cannot currently be selected, moved, or resized after placement, except by discarding unsaved changes. They do not prove signer identity or protect the document from later modification.
 
 The Pages menu and thumbnail context menu expose document organization commands. After page structure changes, the thumbnail view is rebuilt against the updated document.
 
@@ -221,6 +232,8 @@ The current milestone has been checked with:
 - An integration test that generates PDFs, combines them, reorders pages, deletes a page, saves the result, reopens it, and validates page content.
 - An automated form-engine test that creates an AcroForm, detects text/checkbox/choice widgets, updates their values, saves, reopens, and validates persisted values.
 - A Forms-tab construction test that verifies dynamic controls and preservation of unsubmitted text across same-page rerenders.
+- Automated signature-engine tests that embed a transparent signature image, reopen the PDF, verify the page image, and reject invalid placement rectangles.
+- A signature UI smoke test covering typed-image generation, placement activation/cancellation, and selection-handler preservation.
 - A successful PyInstaller Windows build.
 
 Interactive GUI testing is still required for pointer positioning, high-DPI behavior, menus, dialogs, and Windows file association before release.
@@ -230,12 +243,12 @@ Interactive GUI testing is still required for pointer positioning, high-DPI beha
 The following work remains:
 
 1. Add undo and redo using the reserved session history.
-2. Add typed, drawn, and imported-image visual signatures in the Sign tab.
-3. Add form and signature flattening during export.
+2. Add selection, movement, and post-placement resizing for visual signatures.
+3. Add an explicit form-flattening export option.
 4. Expand form testing for complex radio groups, scripts, validation, and fields spanning multiple pages.
 5. Continue responsive-layout testing and retire remaining legacy toolbar behavior.
 6. Improve thumbnail worker isolation and cancellation for large PDFs.
-7. Add automated unit and GUI tests.
+7. Expand automated GUI coverage.
 8. Add a Windows installer and optional file-association registration.
 9. Evaluate certificate-backed digital signatures as a separate security-focused project.
 

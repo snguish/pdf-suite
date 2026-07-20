@@ -39,6 +39,7 @@ Efficiency is the core of this tool. Fixed keyboard variations are supported for
 ### **4. Key Interaction Features**
 * **Contextual Details Panel:** Use **Details** to open Notes, Forms, and Sign workspaces. Note double-clicks open the Notes workspace automatically.
 * **PDF Form Filling:** Open **Details > Forms** to edit interactive text fields, checkboxes, radio buttons, dropdowns, and lists on the current page. Select **Apply Form Changes** before leaving the page or saving.
+* **Visual Signatures:** Open **Details > Sign** to import a signature image, type a signer name, or draw a signature. Then drag its placement area on the page. Visual signatures are flattened page content, not certificate-backed digital signatures.
 * **Enhanced Audit Trail:** Every note tracks who created it and when, as well as the details of the last person to modify the text.
 * **Dynamic Note Inspector:** A side panel appears automatically on **double-click**. It allows for instant text updates without blocking the document view.
 * **Hybrid Highlighting:** Use the **"Text Snap"** toggle during highlight mode. Turn it **ON** for clean text selection or **OFF** to highlight precise areas like signatures or stamps.
