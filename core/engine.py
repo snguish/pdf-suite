@@ -26,6 +26,59 @@ class PDFEngine:
         pix = page.get_pixmap(matrix=mat, annots=True)
         return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
+    def get_form_fields(self, page_index):
+        page = self.doc[page_index]
+        fields = []
+        widgets = page.widgets()
+        if not widgets:
+            return fields
+
+        for widget in widgets:
+            choices = list(widget.choice_values or [])
+            kind = {
+                fitz.PDF_WIDGET_TYPE_CHECKBOX: "checkbox",
+                fitz.PDF_WIDGET_TYPE_COMBOBOX: "choice",
+                fitz.PDF_WIDGET_TYPE_LISTBOX: "choice",
+                fitz.PDF_WIDGET_TYPE_RADIOBUTTON: "radio",
+                fitz.PDF_WIDGET_TYPE_SIGNATURE: "signature",
+                fitz.PDF_WIDGET_TYPE_TEXT: "text",
+            }.get(widget.field_type, "text")
+            fields.append({
+                "xref": widget.xref,
+                "name": widget.field_name or f"Field {widget.xref}",
+                "label": widget.field_label or widget.field_name or f"Field {widget.xref}",
+                "type": widget.field_type,
+                "type_name": widget.field_type_string or "Unknown",
+                "kind": kind,
+                "value": widget.field_value,
+                "choices": choices,
+                "read_only": bool(widget.field_flags & 1),
+                "on_value": widget.on_state() if widget.field_type in (
+                    fitz.PDF_WIDGET_TYPE_CHECKBOX,
+                    fitz.PDF_WIDGET_TYPE_RADIOBUTTON,
+                ) else None,
+            })
+        return fields
+
+    def update_form_field(self, page_index, xref, value):
+        page = self.doc[page_index]
+        widgets = page.widgets()
+        if not widgets:
+            return False
+
+        for widget in widgets:
+            if widget.xref != xref:
+                continue
+            if widget.field_flags & 1:
+                raise ValueError(f"Field '{widget.field_name}' is read-only.")
+            if widget.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
+                widget.field_value = widget.on_state() if value else "Off"
+            else:
+                widget.field_value = value
+            widget.update()
+            return True
+        return False
+
     def rotate_page(self, page_index):
         page = self.doc[page_index]
         page.set_rotation((page.rotation + 90) % 360)

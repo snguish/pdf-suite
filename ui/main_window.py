@@ -18,6 +18,8 @@ class MainWindow:
         self.current_page_index = 0  
         self.extraction_mode = False
         self.active_note_coord = None 
+        self.form_controls = {}
+        self._forms_page_index = None
 
         # 4-Column Layout: Sidebar(0) | Splitter(1) | Canvas(2) | Inspector(3)
         self.root.grid_columnconfigure(2, weight=1) 
@@ -119,7 +121,8 @@ class MainWindow:
         self.save_note_btn = ctk.CTkButton(self.note_tab, text="Update Note", fg_color="#28a745", command=self.save_inspector_note)
         self.save_note_btn.pack(pady=10)
         self.save_note_btn.configure(state="disabled")
-        ctk.CTkLabel(self.forms_tab, text="Form-field tools will appear here\nwhen a PDF form is detected.", text_color="#aaaaaa", justify="center").pack(expand=True, padx=12)
+        self.forms_content = ctk.CTkScrollableFrame(self.forms_tab, fg_color="transparent")
+        self.forms_content.pack(expand=True, fill="both")
         ctk.CTkLabel(self.sign_tab, text="Visual signature tools will appear here\nin the next editing milestone.", text_color="#aaaaaa", justify="center").pack(expand=True, padx=12)
 
         self.canvas.hover_callback = self.handle_hover
@@ -324,6 +327,126 @@ class MainWindow:
             self.mark_document_changed()
             self.load_page(self.current_page_index)
 
+    # --- PDF FORM FIELDS ---
+    def refresh_form_fields(self):
+        self._forms_page_index = self.current_page_index if self.engine else None
+        self.form_controls.clear()
+        for child in self.forms_content.winfo_children():
+            child.destroy()
+
+        if not self.engine:
+            ctk.CTkLabel(self.forms_content, text="Open a PDF to inspect form fields.", text_color="#aaaaaa").pack(pady=20)
+            return
+
+        fields = self.engine.get_form_fields(self.current_page_index)
+        if not fields:
+            ctk.CTkLabel(
+                self.forms_content,
+                text="No interactive form fields\non this page.",
+                text_color="#aaaaaa",
+                justify="center",
+            ).pack(pady=20)
+            return
+
+        ctk.CTkLabel(
+            self.forms_content,
+            text=f"{len(fields)} field(s) on page {self.current_page_index + 1}",
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", padx=6, pady=(4, 10))
+
+        radio_groups = {}
+        for field in fields:
+            if field["kind"] == "radio":
+                radio_groups.setdefault(field["name"], []).append(field)
+                continue
+            self.add_form_control(field)
+
+        for name, group in radio_groups.items():
+            frame = ctk.CTkFrame(self.forms_content, fg_color="transparent")
+            frame.pack(fill="x", padx=4, pady=5)
+            ctk.CTkLabel(frame, text=group[0]["label"], anchor="w").pack(fill="x")
+            variable = ctk.StringVar(value=str(group[0]["value"] or ""))
+            for field in group:
+                option = str(field["on_value"] or field["value"] or "Option")
+                ctk.CTkRadioButton(
+                    frame,
+                    text=option,
+                    variable=variable,
+                    value=option,
+                    state="disabled" if field["read_only"] else "normal",
+                ).pack(anchor="w", padx=8, pady=2)
+            self.form_controls[f"radio:{name}"] = ("radio", variable, group)
+
+        ctk.CTkButton(
+            self.forms_content,
+            text="Apply Form Changes",
+            fg_color="#28a745",
+            command=self.apply_form_changes,
+        ).pack(fill="x", padx=6, pady=14)
+
+    def add_form_control(self, field):
+        frame = ctk.CTkFrame(self.forms_content, fg_color="transparent")
+        frame.pack(fill="x", padx=4, pady=5)
+        label_text = field["label"]
+        if field["read_only"]:
+            label_text += " (read-only)"
+        ctk.CTkLabel(frame, text=label_text, anchor="w").pack(fill="x")
+        state = "disabled" if field["read_only"] else "normal"
+
+        if field["kind"] == "checkbox":
+            variable = ctk.BooleanVar(value=str(field["value"]).lower() not in {"", "0", "false", "off", "none"})
+            control = ctk.CTkCheckBox(frame, text="Selected", variable=variable, state=state)
+            kind = "checkbox"
+        elif field["kind"] == "choice" and field["choices"]:
+            value = str(field["value"] or field["choices"][0])
+            choices = [str(choice) for choice in field["choices"]]
+            if value not in choices:
+                choices.insert(0, value)
+            variable = ctk.StringVar(value=value)
+            control = ctk.CTkOptionMenu(frame, values=choices, variable=variable, state=state)
+            kind = "choice"
+        elif field["kind"] == "signature":
+            variable = ctk.StringVar(value="")
+            control = ctk.CTkLabel(frame, text="Certificate signature field (not editable here)", text_color="#aaaaaa")
+            kind = "signature"
+        else:
+            variable = ctk.StringVar(value=str(field["value"] or ""))
+            control = ctk.CTkEntry(frame, textvariable=variable, state=state)
+            kind = "text"
+
+        control.pack(fill="x", pady=(2, 0))
+        self.form_controls[field["xref"]] = (kind, variable, field)
+
+    def apply_form_changes(self):
+        if not self.engine:
+            return
+        updated = 0
+        try:
+            for key, (kind, variable, field_data) in self.form_controls.items():
+                if kind == "signature":
+                    continue
+                if kind == "radio":
+                    fields = field_data
+                    if fields and all(field["read_only"] for field in fields):
+                        continue
+                    if fields and self.engine.update_form_field(self.current_page_index, fields[0]["xref"], variable.get()):
+                        updated += 1
+                    continue
+                if field_data["read_only"]:
+                    continue
+                if self.engine.update_form_field(self.current_page_index, key, variable.get()):
+                    updated += 1
+        except Exception as exc:
+            messagebox.showerror("Form Error", f"Could not update the form:\n{exc}")
+            return
+
+        if updated:
+            self.mark_document_changed()
+            self._forms_page_index = None
+            self.load_page(self.current_page_index)
+            self.context_tabs.set("Forms")
+            self.status_label.configure(text=f" Updated {updated} form field(s)")
+
     # --- ANNOTATION MODES ---
     def apply_highlight(self, event):
         if not self.canvas.highlight_mode: return
@@ -380,6 +503,8 @@ class MainWindow:
                 self.root.after(200, lambda: self.sidebar.scroll_to_page(idx))
             self.page_label.configure(text=f"{idx + 1} / {len(self.engine.doc)}")
             self.status_label.configure(text=f" Page {idx+1} of {len(self.engine.doc)}")
+            if self._forms_page_index != idx:
+                self.refresh_form_fields()
 
     def open_file(self):
         p = filedialog.askopenfilename(filetypes=[("PDF", "*.pdf")])
@@ -401,6 +526,7 @@ class MainWindow:
                 old_engine.close()
             self.current_file_path = path
             self.session.reset()
+            self._forms_page_index = None
             self.update_window_title()
             self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
             self.sidebar.pack(expand=True, fill="both", pady=5); self.zoom_to_fit(); self.load_page(0)
@@ -429,6 +555,7 @@ class MainWindow:
         self.clear_nav_area()
         self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
         self.sidebar.pack(expand=True, fill="both", pady=5)
+        self._forms_page_index = None
         self.mark_document_changed()
         self.load_page(current_page)
         self.status_label.configure(text=f" Combined document: {len(self.engine.doc)} pages")
@@ -612,6 +739,7 @@ class MainWindow:
         self.sidebar = Sidebar(self.nav_container, self.engine, self.load_page, self.rotate_page, self.handle_page_action)
         self.sidebar.pack(expand=True, fill="both", pady=5)
         self.current_page_index = target
+        self._forms_page_index = None
         self.mark_document_changed()
         self.load_page(target)
 

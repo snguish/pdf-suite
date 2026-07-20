@@ -12,7 +12,7 @@ PDF Suite is a local desktop application for reviewing and organizing PDF docume
 
 All document processing is local. The application does not upload PDFs, annotations, signatures, or user information to a remote service.
 
-Form filling and visual signatures are planned for the next implementation milestone. Certificate-backed cryptographic signing is a separate advanced capability and is not currently implemented.
+Interactive AcroForm filling is implemented for text fields, checkboxes, radio buttons, combo boxes, and list boxes. Visual signatures are planned for the next implementation milestone. Certificate-backed cryptographic signing is a separate advanced capability and is not currently implemented.
 
 ## 2. Technology stack
 
@@ -72,6 +72,7 @@ The window title contains an asterisk when changes are unsaved. Opening another 
 `PDFEngine` wraps the active PyMuPDF document. Its responsibilities include:
 
 - Rendering full pages and thumbnails.
+- Detecting interactive form widgets and updating their values by PDF cross-reference ID.
 - Rotating, cropping, moving, deleting, and extracting pages.
 - Atomically combining the active document with additional PDFs.
 - Creating, reading, editing, deleting, and exporting highlight notes.
@@ -94,7 +95,18 @@ Thumbnail panel | Document canvas | Contextual Details workspace
 Status bar
 ```
 
-The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the existing annotation workflow. Forms and Sign reserve stable locations for the next editing milestone and are explicitly labeled as upcoming rather than presenting inactive controls as complete features.
+The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the annotation workflow. Forms dynamically displays widgets found on the current PDF page. Sign reserves a stable location for the next editing milestone and is explicitly labeled as upcoming rather than presenting inactive controls as a complete feature.
+
+The Forms tab maps PDF widget types to native controls:
+
+- Text and otherwise unsupported editable values use text entries.
+- Checkboxes use boolean controls and the widget's real PDF on-state.
+- Radio widgets with the same field name are grouped as radio options.
+- Combo boxes and list boxes use the choices embedded in the PDF.
+- Read-only fields are displayed but disabled.
+- Certificate signature fields are identified but cannot be edited by the form workflow.
+
+Controls are cached while the current page is rerendered, preventing zoom changes from discarding unsubmitted entry text. **Apply Form Changes** writes the visible controls to PyMuPDF widgets, rerenders the page, and marks the document unsaved.
 
 The Pages menu and thumbnail context menu expose document organization commands. After page structure changes, the thumbnail view is rebuilt against the updated document.
 
@@ -207,6 +219,8 @@ The current milestone has been checked with:
 - Python bytecode compilation for the application modules.
 - `git diff --check` for patch formatting errors.
 - An integration test that generates PDFs, combines them, reorders pages, deletes a page, saves the result, reopens it, and validates page content.
+- An automated form-engine test that creates an AcroForm, detects text/checkbox/choice widgets, updates their values, saves, reopens, and validates persisted values.
+- A Forms-tab construction test that verifies dynamic controls and preservation of unsubmitted text across same-page rerenders.
 - A successful PyInstaller Windows build.
 
 Interactive GUI testing is still required for pointer positioning, high-DPI behavior, menus, dialogs, and Windows file association before release.
@@ -216,9 +230,9 @@ Interactive GUI testing is still required for pointer positioning, high-DPI beha
 The following work remains:
 
 1. Add undo and redo using the reserved session history.
-2. Detect and fill existing AcroForm fields in the Forms tab.
-3. Add typed, drawn, and imported-image visual signatures in the Sign tab.
-4. Add form and signature flattening during export.
+2. Add typed, drawn, and imported-image visual signatures in the Sign tab.
+3. Add form and signature flattening during export.
+4. Expand form testing for complex radio groups, scripts, validation, and fields spanning multiple pages.
 5. Continue responsive-layout testing and retire remaining legacy toolbar behavior.
 6. Improve thumbnail worker isolation and cancellation for large PDFs.
 7. Add automated unit and GUI tests.
