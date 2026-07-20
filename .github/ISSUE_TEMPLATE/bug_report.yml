@@ -1,0 +1,48 @@
+name: Bug report
+description: Report reproducible incorrect behavior in PDF Suite.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve PDF Suite. Do not attach confidential PDFs.
+  - type: input
+    id: version
+    attributes:
+      label: PDF Suite version
+      placeholder: 1.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How are you running PDF Suite?
+      options:
+        - Portable Windows release
+        - From source
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest safe example possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots and non-sensitive sample PDFs are welcome.
