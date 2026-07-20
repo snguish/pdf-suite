@@ -5,6 +5,9 @@ from PIL import Image, ImageDraw, ImageFont
 from core.engine import PDFEngine
 from ui.sidebar import Sidebar
 from ui.canvas import PDFCanvas
+from ui.layout import DEFAULT_SIDEBAR_WIDTH, clamp_sidebar_width, layout_mode
+from ui.tooltip import ToolTip
+from ui.menu_bar import DarkMenuBar
 
 class MainWindow:
     def __init__(self, root, session, initial_file=None):
@@ -23,6 +26,9 @@ class MainWindow:
         self._auto_hidden_sidebar = False
         self.form_controls = {}
         self._forms_page_index = None
+        self.sidebar_width = DEFAULT_SIDEBAR_WIDTH
+        self._layout_mode = None
+        self._resize_job = None
 
         # 4-Column Layout: Sidebar(0) | Splitter(1) | Canvas(2) | Inspector(3)
         self.root.grid_columnconfigure(2, weight=1) 
@@ -30,34 +36,42 @@ class MainWindow:
         self.root.grid_rowconfigure(1, weight=1)
 
         self.setup_ui()
+        self.root.bind("<Configure>", self._schedule_responsive_layout, add="+")
         self.root.protocol("WM_DELETE_WINDOW", self.close_window)
         self.root.after(100, self.bind_shortcuts)
         if initial_file:
             self.check_ready_and_load(initial_file)
 
     def setup_ui(self):
+        self.top_chrome = ctk.CTkFrame(self.root, corner_radius=0, fg_color="transparent")
+        self.top_chrome.grid(row=0, column=0, columnspan=4, sticky="ew")
         self.setup_menu()
-        # --- COMPACT TOOLBAR ---
-        self.ribbon = ctk.CTkFrame(self.root, height=44, corner_radius=0, border_width=1, border_color="#333333")
-        self.ribbon.grid(row=0, column=0, columnspan=4, sticky="ew")
+        # --- TOOLBAR ---
+        self.ribbon = ctk.CTkFrame(self.top_chrome, height=54, corner_radius=0, border_width=1, border_color="#3f4650")
+        self.ribbon.pack(fill="x")
+        self.ribbon.grid_propagate(False)
         self.ribbon.grid_columnconfigure((0, 1, 2), weight=1) 
         
         # Group 1: Navigation/File
         self.left_group = ctk.CTkFrame(self.ribbon, fg_color="transparent")
-        self.left_group.grid(row=0, column=0, sticky="w", padx=10)
-        ctk.CTkButton(self.left_group, text="Open", width=62, command=self.open_file, fg_color="#3d3d3d").pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="Save", width=62, command=self.save_overwrite, fg_color="#3d3d3d").pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="‹", width=30, command=self.prev_page).pack(side="left", padx=(10, 2))
+        self.left_group.grid(row=0, column=0, sticky="w", padx=12, pady=8)
+        self.open_btn = ctk.CTkButton(self.left_group, text="Open", width=62, command=self.open_file, fg_color="#454b54")
+        self.open_btn.pack(side="left", padx=3)
+        self.save_btn = ctk.CTkButton(self.left_group, text="Save", width=62, command=self.save_overwrite, fg_color="#454b54")
+        self.save_btn.pack(side="left", padx=3)
+        self.prev_btn = ctk.CTkButton(self.left_group, text="‹", width=32, command=self.prev_page)
+        self.prev_btn.pack(side="left", padx=(10, 3))
         self.page_entry = ctk.CTkEntry(self.left_group, width=42, justify="center", placeholder_text="—")
         self.page_entry.pack(side="left", padx=2)
         self.page_entry.bind("<Return>", self.go_to_page_from_entry)
         self.page_total_label = ctk.CTkLabel(self.left_group, text="/ —", width=42, anchor="w")
         self.page_total_label.pack(side="left")
-        ctk.CTkButton(self.left_group, text="›", width=30, command=self.next_page).pack(side="left", padx=2)
+        self.next_btn = ctk.CTkButton(self.left_group, text="›", width=32, command=self.next_page)
+        self.next_btn.pack(side="left", padx=3)
 
         # Group 2: View Controls
         self.center_group = ctk.CTkFrame(self.ribbon, fg_color="transparent")
-        self.center_group.grid(row=0, column=1, sticky="n")
+        self.center_group.grid(row=0, column=1, sticky="n", pady=8)
         ctk.CTkButton(self.center_group, text="-", width=30, command=lambda: self.adjust_zoom(-0.1)).pack(side="left", padx=5)
         self.zoom_label = ctk.CTkLabel(self.center_group, text="100%", width=50, font=("Segoe UI", 12, "bold"))
         self.zoom_label.pack(side="left")
@@ -70,7 +84,7 @@ class MainWindow:
 
         # Group 3: Note/Extraction Tools
         self.right_group = ctk.CTkFrame(self.ribbon, fg_color="transparent")
-        self.right_group.grid(row=0, column=2, sticky="e", padx=10)
+        self.right_group.grid(row=0, column=2, sticky="e", padx=12, pady=8)
         
         self.save_dropdown = ctk.CTkOptionMenu(
             self.right_group, 
@@ -90,31 +104,37 @@ class MainWindow:
         self.apply_crop_btn = ctk.CTkButton(self.right_group, text="Apply Crop", width=84, fg_color="#28a745", command=self.apply_crop)
 
         # --- PANELS ---
-        self.left_panel = ctk.CTkFrame(self.root, width=280, corner_radius=0)
+        self.left_panel = ctk.CTkFrame(self.root, width=self.sidebar_width, corner_radius=0, border_width=1, border_color="#3f4650")
+        self.left_panel.grid_propagate(False)
         self.left_panel.grid(row=1, column=0, sticky="nsew")
         self.nav_container = ctk.CTkFrame(self.left_panel, fg_color="transparent")
         self.nav_container.pack(expand=True, fill="both")
-        self.splitter = ctk.CTkButton(self.root, text="«", width=12, corner_radius=0, command=self.toggle_sidebar)
+        self.splitter = ctk.CTkButton(self.root, text="«", width=14, corner_radius=0, command=self.toggle_sidebar, fg_color="#30363d")
         self.splitter.grid(row=1, column=1, sticky="nsew")
+        self.splitter.bind("<ButtonPress-1>", self._start_sidebar_resize, add="+")
+        self.splitter.bind("<B1-Motion>", self._resize_sidebar, add="+")
         self.canvas_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         self.canvas_frame.grid(row=1, column=2, sticky="nsew")
         self.canvas_frame.grid_rowconfigure(0, weight=1); self.canvas_frame.grid_columnconfigure(1, weight=1)
         self.tool_rail = ctk.CTkFrame(self.canvas_frame, width=72, corner_radius=0)
         self.tool_rail.grid(row=0, column=0, sticky="ns")
-        ctk.CTkLabel(self.tool_rail, text="TOOLS", font=("Segoe UI", 9, "bold"), text_color="#999999").pack(pady=(10, 6))
-        self.pointer_btn = ctk.CTkButton(self.tool_rail, text="Pointer", width=62, command=self.activate_pointer_mode)
+        ctk.CTkLabel(self.tool_rail, text="TOOLS", font=("Segoe UI", 9, "bold"), text_color="#b8c0cc").pack(pady=(10, 6))
+        self.pointer_btn = ctk.CTkButton(self.tool_rail, text="Pointer", width=62, command=self.activate_pointer_mode, border_width=2, border_color="#8cc8ff")
         self.pointer_btn.pack(padx=5, pady=3)
         self.highlight_btn = ctk.CTkButton(self.tool_rail, text="Highlight", width=62, fg_color="#3d3d3d", command=self.toggle_highlight_mode)
         self.highlight_btn.pack(padx=5, pady=3)
         self.crop_btn = ctk.CTkButton(self.tool_rail, text="Crop", width=62, fg_color="#3d3d3d", command=self.toggle_crop_mode)
         self.crop_btn.pack(padx=5, pady=3)
-        ctk.CTkButton(self.tool_rail, text="Forms", width=62, fg_color="#3d3d3d", command=lambda: self.open_context_tab("Forms")).pack(padx=5, pady=(14, 3))
-        ctk.CTkButton(self.tool_rail, text="Sign", width=62, fg_color="#3d3d3d", command=lambda: self.open_context_tab("Sign")).pack(padx=5, pady=3)
+        self.forms_btn = ctk.CTkButton(self.tool_rail, text="Forms", width=62, fg_color="#454b54", command=lambda: self.open_context_tab("Forms"))
+        self.forms_btn.pack(padx=5, pady=(14, 3))
+        self.sign_btn = ctk.CTkButton(self.tool_rail, text="Sign", width=62, fg_color="#454b54", command=lambda: self.open_context_tab("Sign"))
+        self.sign_btn.pack(padx=5, pady=3)
         self.canvas = PDFCanvas(self.canvas_frame)
         self.canvas.grid(row=0, column=1, sticky="nsew")
         
         # Reusable contextual workspace (hidden initially)
-        self.inspector_panel = ctk.CTkFrame(self.root, width=280, corner_radius=0, border_width=1, border_color="#333333")
+        self.inspector_panel = ctk.CTkFrame(self.root, width=280, corner_radius=0, border_width=1, border_color="#3f4650")
+        self.inspector_panel.grid_propagate(False)
         context_header = ctk.CTkFrame(self.inspector_panel, fg_color="transparent")
         context_header.pack(fill="x", padx=8, pady=(8, 0))
         ctk.CTkLabel(context_header, text="DOCUMENT DETAILS", font=("Segoe UI", 12, "bold")).pack(side="left")
@@ -168,39 +188,136 @@ class MainWindow:
         self.canvas.right_click_callback = self.handle_right_click
         self.canvas.wheel_callback = self.handle_canvas_wheel
         self.canvas.selection_callback = self.handle_selection_release
-        self.status_label = ctk.CTkLabel(self.root, text=" Ready", anchor="w", height=25, fg_color="#1a1a1a")
+        self.status_label = ctk.CTkLabel(self.root, text="  Ready   |   Page — / —   |   Zoom 100%   |   Saved", anchor="w", height=28, fg_color="#111827", text_color="#e5e7eb", font=("Segoe UI", 11, "bold"))
         self.status_label.grid(row=2, column=0, columnspan=4, sticky="ew")
+        self._standardize_controls()
+        self._install_tooltips()
+
+    def _standardize_controls(self):
+        """Apply one compact, high-contrast control language across the window."""
+        def visit(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ctk.CTkButton):
+                    child.configure(height=32, font=("Segoe UI", 11, "bold"), hover_color="#596270")
+                    self._add_focus_ring(child)
+                elif isinstance(child, (ctk.CTkEntry, ctk.CTkOptionMenu)):
+                    child.configure(height=32, font=("Segoe UI", 11))
+                    self._add_focus_ring(child)
+                visit(child)
+        visit(self.root)
+        self.save_note_btn.configure(text_color_disabled="#9ca3af")
+
+    def _add_focus_ring(self, widget):
+        """Expose keyboard focus on composite CustomTkinter controls."""
+        try:
+            widget.configure(takefocus=True, border_width=1, border_color="#596270")
+            widget.bind("<FocusIn>", lambda _e, w=widget: w.configure(border_width=2, border_color="#8cc8ff"), add="+")
+            widget.bind("<FocusOut>", lambda _e, w=widget: w.configure(border_width=1, border_color="#596270"), add="+")
+        except (ValueError, TypeError):
+            pass
+
+    def _install_tooltips(self):
+        tips = (
+            (self.pointer_btn, "Pointer (Esc): select and inspect the page"),
+            (self.highlight_btn, "Highlight (H): drag over text or an area"),
+            (self.crop_btn, "Crop (C): drag the new page boundary"),
+            (self.forms_btn, "Forms: inspect fields on the current page"),
+            (self.sign_btn, "Sign: place a visual signature"),
+        )
+        self._tooltips = [ToolTip(widget, message) for widget, message in tips]
+
+    def _schedule_responsive_layout(self, event):
+        if event.widget is not self.root:
+            return
+        if self._resize_job:
+            self.root.after_cancel(self._resize_job)
+        self._resize_job = self.root.after(60, self._apply_responsive_layout)
+
+    def _apply_responsive_layout(self):
+        self._resize_job = None
+        width = self.root.winfo_width()
+        mode = layout_mode(width)
+
+        # Two toolbar rows keep every action usable at the supported narrow sizes.
+        if width < 1100:
+            self.ribbon.configure(height=96)
+            self.left_group.grid_configure(row=0, column=0, columnspan=2, sticky="w", pady=(7, 2))
+            self.right_group.grid_configure(row=0, column=2, sticky="e", pady=(7, 2))
+            self.center_group.grid_configure(row=1, column=0, columnspan=3, sticky="w", padx=12, pady=(2, 7))
+        else:
+            self.ribbon.configure(height=54)
+            self.left_group.grid_configure(row=0, column=0, columnspan=1, sticky="w", padx=12, pady=8)
+            self.center_group.grid_configure(row=0, column=1, columnspan=1, sticky="n", padx=0, pady=8)
+            self.right_group.grid_configure(row=0, column=2, sticky="e", pady=8)
+
+        if mode == "drawer":
+            self.splitter.grid_remove()
+            if self.inspector_visible and self.sidebar_visible:
+                self.left_panel.grid_remove()
+                self.left_panel.place_forget()
+                self.sidebar_visible = False
+                self._auto_hidden_sidebar = True
+            if self.sidebar_visible:
+                self._place_drawer(self.left_panel, "left", self.sidebar_width)
+            if self.inspector_visible:
+                self._place_drawer(self.inspector_panel, "right", min(320, width - 80))
+        else:
+            self.left_panel.place_forget()
+            self.inspector_panel.place_forget()
+            if self.sidebar_visible:
+                self.left_panel.grid(row=1, column=0, sticky="nsew")
+            self.splitter.grid(row=1, column=1, sticky="nsew")
+            if self.inspector_visible:
+                self.inspector_panel.grid(row=1, column=3, sticky="nsew")
+        self._layout_mode = mode
+
+    def _place_drawer(self, panel, side, width):
+        panel.grid_remove()
+        panel.lift()
+        x = 0 if side == "left" else self.root.winfo_width() - width
+        chrome_height = self.top_chrome.winfo_height()
+        height = max(1, self.root.winfo_height() - chrome_height - self.status_label.winfo_height())
+        panel.configure(width=width, height=height)
+        panel.place(x=x, y=chrome_height)
+
+    def _start_sidebar_resize(self, event):
+        self._resize_origin_x = event.x_root
+        self._resize_origin_width = self.sidebar_width
+
+    def _resize_sidebar(self, event):
+        if self._layout_mode == "drawer":
+            return
+        self.sidebar_width = clamp_sidebar_width(self._resize_origin_width + event.x_root - self._resize_origin_x)
+        self.left_panel.configure(width=self.sidebar_width)
 
     def setup_menu(self):
-        menu_bar = Menu(self.root)
-
-        file_menu = Menu(menu_bar, tearoff=0)
-        file_menu.add_command(label="Open PDF...", accelerator="Ctrl+O", command=self.open_file)
-        file_menu.add_separator()
-        file_menu.add_command(label="Save", accelerator="Ctrl+S", command=self.save_overwrite)
-        file_menu.add_command(label="Save Copy as...", accelerator="Ctrl+Shift+S", command=self.export_pdf)
-        file_menu.add_command(label="Export Notes...", accelerator="Ctrl+E", command=self.export_comments)
-        file_menu.add_separator()
-        file_menu.add_command(label="Close", command=self.close_window)
-        menu_bar.add_cascade(label="File", menu=file_menu)
-
-        pages_menu = Menu(menu_bar, tearoff=0)
-        pages_menu.add_command(label="Combine PDFs...", command=self.combine_pdfs)
-        pages_menu.add_command(label="Extract Pages...", command=self.toggle_extraction_mode)
-        menu_bar.add_cascade(label="Pages", menu=pages_menu)
-
-        view_menu = Menu(menu_bar, tearoff=0)
-        view_menu.add_command(label="Zoom In", accelerator="+", command=lambda: self.adjust_zoom(0.1))
-        view_menu.add_command(label="Zoom Out", accelerator="-", command=lambda: self.adjust_zoom(-0.1))
-        view_menu.add_command(label="Actual Size", accelerator="Ctrl+1", command=self.reset_zoom)
-        view_menu.add_command(label="Fit Page", accelerator="Ctrl+0", command=self.zoom_to_fit)
-        view_menu.add_command(label="Fit Width", accelerator="Ctrl+2", command=self.zoom_to_width)
-        view_menu.add_separator()
-        view_menu.add_command(label="Toggle Thumbnails", accelerator="S", command=self.toggle_sidebar)
-        view_menu.add_command(label="Toggle Details", command=self.toggle_inspector)
-        menu_bar.add_cascade(label="View", menu=view_menu)
-
-        self.root.configure(menu=menu_bar)
+        menus = [
+            ("File", [
+                {"label": "Open PDF...", "accelerator": "Ctrl+O", "command": self.open_file},
+                None,
+                {"label": "Save", "accelerator": "Ctrl+S", "command": self.save_overwrite},
+                {"label": "Save Copy as...", "accelerator": "Ctrl+Shift+S", "command": self.export_pdf},
+                {"label": "Export Notes...", "accelerator": "Ctrl+E", "command": self.export_comments},
+                None,
+                {"label": "Close", "command": self.close_window},
+            ]),
+            ("Pages", [
+                {"label": "Combine PDFs...", "command": self.combine_pdfs},
+                {"label": "Extract Pages...", "command": self.toggle_extraction_mode},
+            ]),
+            ("View", [
+                {"label": "Zoom In", "accelerator": "+", "command": lambda: self.adjust_zoom(0.1)},
+                {"label": "Zoom Out", "accelerator": "-", "command": lambda: self.adjust_zoom(-0.1)},
+                {"label": "Actual Size", "accelerator": "Ctrl+1", "command": self.reset_zoom},
+                {"label": "Fit Page", "accelerator": "Ctrl+0", "command": self.zoom_to_fit},
+                {"label": "Fit Width", "accelerator": "Ctrl+2", "command": self.zoom_to_width},
+                None,
+                {"label": "Toggle Thumbnails", "accelerator": "S", "command": self.toggle_sidebar},
+                {"label": "Toggle Details", "accelerator": "Ctrl+D", "command": self.toggle_inspector},
+            ]),
+        ]
+        self.menu_bar = DarkMenuBar(self.top_chrome, menus)
+        self.menu_bar.pack(fill="x")
 
     # --- UPDATED KEYBOARD SHORTCUTS ---
     def bind_shortcuts(self):
@@ -223,6 +340,9 @@ class MainWindow:
         self.root.bind("<Control-Key-0>", lambda e: self.zoom_to_fit())
         self.root.bind("<Control-Key-1>", lambda e: self.reset_zoom())
         self.root.bind("<Control-Key-2>", lambda e: self.zoom_to_width())
+        self.root.bind("<Control-d>", lambda e: self.run_shortcut(e, self.toggle_inspector))
+        self.root.bind("<Control-Alt-f>", lambda e: self.run_shortcut(e, lambda: self.open_context_tab("Forms")))
+        self.root.bind("<Control-Alt-s>", lambda e: self.run_shortcut(e, lambda: self.open_context_tab("Sign")))
 
         # Zoom In (+) variations
         self.root.bind("<plus>", lambda e: self.adjust_zoom(0.1))    # Numpad + or Shifted =
@@ -322,25 +442,34 @@ class MainWindow:
     # --- INSPECTOR LOGIC ---
     def show_inspector(self):
         if not self.inspector_visible:
-            if self.root.winfo_width() < 1180 and self.sidebar_visible:
+            mode = layout_mode(self.root.winfo_width())
+            if mode in {"compact", "drawer"} and self.sidebar_visible:
                 self.left_panel.grid_remove()
+                self.left_panel.place_forget()
                 self.splitter.configure(text="»")
                 self.sidebar_visible = False
                 self._auto_hidden_sidebar = True
-            self.inspector_panel.grid(row=1, column=3, sticky="nsew")
             self.inspector_visible = True
             self.context_btn.configure(text="Hide Details", width=88)
+            if mode == "drawer":
+                self._place_drawer(self.inspector_panel, "right", min(320, self.root.winfo_width() - 80))
+            else:
+                self.inspector_panel.grid(row=1, column=3, sticky="nsew")
             self.root.after(50, self.zoom_to_fit)
 
     def hide_inspector(self):
         if self.inspector_visible:
             self.inspector_panel.grid_remove()
+            self.inspector_panel.place_forget()
             self.inspector_visible = False; self.active_note_coord = None
             self.context_btn.configure(text="Details", width=68)
-            if self._auto_hidden_sidebar and self.root.winfo_width() >= 850:
-                self.left_panel.grid()
+            if self._auto_hidden_sidebar:
                 self.splitter.configure(text="«")
                 self.sidebar_visible = True
+                if layout_mode(self.root.winfo_width()) == "drawer":
+                    self._place_drawer(self.left_panel, "left", self.sidebar_width)
+                else:
+                    self.left_panel.grid(row=1, column=0, sticky="nsew")
             self._auto_hidden_sidebar = False
             self.root.after(50, self.zoom_to_fit)
 
@@ -682,26 +811,26 @@ class MainWindow:
         if self.canvas.signature_mode: self.cancel_signature_placement()
         is_on = self.highlight_btn.cget("text") == "Cancel Highlight"
         if not is_on:
-            self.highlight_btn.configure(text="Cancel Highlight", fg_color="#d39e00")
-            self.pointer_btn.configure(fg_color="#3d3d3d")
+            self.highlight_btn.configure(text="Cancel Highlight", fg_color="#d39e00", border_width=2, border_color="#ffe08a")
+            self.pointer_btn.configure(fg_color="#454b54", border_width=1, border_color="#596270")
             self.snap_switch.pack(side="left", padx=10); self.canvas.set_modes(highlight=True)
         else:
-            self.highlight_btn.configure(text="Highlight", fg_color="#4a4a4a")
+            self.highlight_btn.configure(text="Highlight", fg_color="#454b54", border_width=1, border_color="#596270")
             self.snap_switch.pack_forget(); self.canvas.set_modes(highlight=False)
-            self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
+            self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"), border_width=2, border_color="#8cc8ff")
 
     def toggle_crop_mode(self):
         if self.highlight_btn.cget("text") == "Cancel Highlight": self.toggle_highlight_mode()
         if self.canvas.signature_mode: self.cancel_signature_placement()
         is_on = self.crop_btn.cget("text") == "Cancel Crop"
         if not is_on:
-            self.crop_btn.configure(text="Cancel Crop", fg_color="#d35b5b")
-            self.pointer_btn.configure(fg_color="#3d3d3d")
+            self.crop_btn.configure(text="Cancel Crop", fg_color="#d35b5b", border_width=2, border_color="#ffb4b4")
+            self.pointer_btn.configure(fg_color="#454b54", border_width=1, border_color="#596270")
             self.apply_crop_btn.pack(side="right", padx=5); self.canvas.set_modes(crop=True)
         else:
-            self.crop_btn.configure(text="Crop", fg_color="#4a4a4a")
+            self.crop_btn.configure(text="Crop", fg_color="#454b54", border_width=1, border_color="#596270")
             self.apply_crop_btn.pack_forget(); self.canvas.set_modes(crop=False)
-            self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
+            self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"), border_width=2, border_color="#8cc8ff")
 
     def activate_pointer_mode(self):
         if self.highlight_btn.cget("text") == "Cancel Highlight":
@@ -714,7 +843,7 @@ class MainWindow:
             self.pending_signature_bytes = None
             self.signature_status.configure(text="Choose a signature, then drag its area on the page.", text_color="#aaaaaa")
         self.canvas.set_modes()
-        self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
+        self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"), border_width=2, border_color="#8cc8ff")
 
     def apply_crop(self):
         px = self.canvas.get_selection_pixels()
@@ -738,7 +867,7 @@ class MainWindow:
             self.page_entry.delete(0, "end")
             self.page_entry.insert(0, str(idx + 1))
             self.page_total_label.configure(text=f"/ {len(self.engine.doc)}")
-            self.status_label.configure(text=f" Page {idx+1} of {len(self.engine.doc)}")
+            self.update_status()
             if self._forms_page_index != idx:
                 self.refresh_form_fields()
 
@@ -806,10 +935,18 @@ class MainWindow:
         MainWindow(new_window, SessionManager())
 
     def toggle_sidebar(self):
-        if self.sidebar_visible: self.left_panel.grid_remove(); self.splitter.configure(text="»")
-        else: self.left_panel.grid(); self.splitter.configure(text="«")
+        target_visible = not self.sidebar_visible
+        drawer = layout_mode(self.root.winfo_width()) == "drawer"
+        if not target_visible:
+            self.left_panel.grid_remove(); self.left_panel.place_forget(); self.splitter.configure(text="»")
+        elif drawer:
+            if self.inspector_visible:
+                self.hide_inspector()
+            self._place_drawer(self.left_panel, "left", self.sidebar_width); self.splitter.configure(text="«")
+        else:
+            self.left_panel.grid(row=1, column=0, sticky="nsew"); self.splitter.configure(text="«")
         self._auto_hidden_sidebar = False
-        self.sidebar_visible = not self.sidebar_visible; self.root.after(50, self.zoom_to_fit)
+        self.sidebar_visible = target_visible; self.root.after(50, self.zoom_to_fit)
 
     def go_to_page_from_entry(self, event=None):
         if not self.engine:
@@ -859,7 +996,7 @@ class MainWindow:
                     self.engine.save_file(self.current_file_path)
                     self.session.mark_saved()
                     self.update_window_title()
-                    self.status_label.configure(text=" Changes saved")
+                    self.update_status("Changes saved")
                 except Exception as exc:
                     messagebox.showerror("Save Error", str(exc))
     def export_pdf(self):
@@ -884,8 +1021,9 @@ class MainWindow:
             c = self.engine.get_comment_at_pos(self.current_page_index, self.get_pdf_coords(sx, sy))
             if c:
                 display_text = c.split("---\n", 1)[1] if "---" in c else c
-                self.status_label.configure(text=f" Note: {display_text[:75]}...", text_color="#ffcc00")
-            else: self.status_label.configure(text=f" Page {self.current_page_index+1}", text_color="white")
+                self.update_status(f"Note: {display_text[:75]}…", tone="warning")
+            else:
+                self.update_status()
     def handle_right_click(self, sx, sy, rx, ry):
         if not self.engine: return
         coords = self.get_pdf_coords(sx, sy)
@@ -996,6 +1134,19 @@ class MainWindow:
     def mark_document_changed(self):
         self.session.mark_changed()
         self.update_window_title()
+        self.update_status()
+
+    def update_status(self, message=None, tone=None):
+        if self.engine:
+            page = f"Page {self.current_page_index + 1} / {len(self.engine.doc)}"
+        else:
+            page = "Page — / —"
+        modified = "Modified" if self.session.unsaved_changes else "Saved"
+        lead = message or ("Ready" if self.engine else "No document")
+        self.status_label.configure(
+            text=f"  {lead}   |   {page}   |   Zoom {int(self.current_zoom * 100)}%   |   {modified}",
+            text_color="#fbbf24" if tone == "warning" or self.session.unsaved_changes else "#e5e7eb",
+        )
 
     def update_window_title(self):
         name = os.path.basename(self.current_file_path) if self.current_file_path else "PDF Suite"

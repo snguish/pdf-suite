@@ -14,18 +14,10 @@ function Invoke-Checked {
     }
 }
 
-$buildPython = Join-Path $PSScriptRoot ".build-venv\Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $buildPython)) {
-    Invoke-Checked { py -3 -m venv .build-venv } "Creating the build environment"
-}
+$env:UV_PROJECT_ENVIRONMENT = Join-Path $PSScriptRoot ".build-venv"
+Invoke-Checked { uv sync --locked --group build } "Synchronizing build dependencies"
 
-$buildPip = Join-Path $PSScriptRoot ".build-venv\Scripts\pip.exe"
-if (-not (Test-Path -LiteralPath $buildPip)) {
-    Invoke-Checked { py -3 -m venv --clear .build-venv } "Repairing the build environment"
-}
-
-Invoke-Checked { & $buildPython -m pip install --upgrade pip } "Upgrading pip"
-Invoke-Checked { & $buildPython -m pip install -r requirements-build.txt } "Installing build dependencies"
+$buildPython = Join-Path $env:UV_PROJECT_ENVIRONMENT "Scripts\python.exe"
 Invoke-Checked { & $buildPython -m PyInstaller `
     --noconfirm `
     --clean `

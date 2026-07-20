@@ -6,7 +6,7 @@
 ---
 
 ### **1. Windows Build**
-Run **`build_windows.ps1`** from PowerShell to create a self-contained application folder. The executable is produced at **`dist\PDF Suite\PDF Suite.exe`** and does not require Python on the destination computer.
+Install [uv](https://docs.astral.sh/uv/), then run **`build_windows.ps1`** from PowerShell to create a self-contained application folder. The executable is produced at **`dist\PDF Suite\PDF Suite.exe`** and does not require Python on the destination computer.
 
 ---
 
@@ -28,6 +28,7 @@ The compact page control displays `‹ [current page] / total ›`. Enter a page
 | **`Ctrl` + `Mouse Wheel`** | **Zoom at Pointer** (Keeps the pointed area in view) |
 | **`f`** | **Fit Page** (Frame entire page in window) |
 | **`Ctrl + 2`** | **Fit Width** (Fill the available canvas width) |
+| **`Ctrl + D`** | Show / Hide **Details** |
 | **`b`** | **Reset View** (Return to 100% zoom) |
 | **`+` / `-`** | **Zoom In / Out** (Works on Numpad and Main keys) |
 | **`s`** | Show / Hide Sidebar Navigation |
@@ -40,6 +41,9 @@ The compact page control displays `‹ [current page] / total ›`. Enter a page
 
 ### **4. Key Interaction Features**
 * **Contextual Details Panel:** Use **Details** to open Notes, Forms, and Sign workspaces. Note double-clicks open the Notes workspace automatically.
+* **Responsive workspace:** The thumbnail panel can be resized by dragging its divider. At narrow widths, thumbnails and Details open as temporary drawers so the page remains usable.
+
+For packaged visual smoke checks, run `tests\visual_smoke.ps1 -PdfPath sample.pdf` after building. It captures normal, Details, Forms, Sign, 800×600, and 1024×768 states under `.test-temp`.
 * **PDF Form Filling:** Open **Details > Forms** to edit interactive text fields, checkboxes, radio buttons, dropdowns, and lists on the current page. Select **Apply Form Changes** before leaving the page or saving.
 * **Visual Signatures:** Open **Details > Sign** to import a signature image, type a signer name, or draw a signature. Then drag its placement area on the page. Visual signatures are flattened page content, not certificate-backed digital signatures.
 * **Enhanced Audit Trail:** Every note tracks who created it and when, as well as the details of the last person to modify the text.

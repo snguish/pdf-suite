@@ -2,7 +2,7 @@ import customtkinter as ctk
 import sys
 import os
 
-# Ensure the app can find its internal modules even when launched from a .bat
+# Ensure the app can find its internal modules from source and packaged builds.
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from core.session import SessionManager

@@ -4,8 +4,7 @@ from tkinter import Menu
 
 class Sidebar(ctk.CTkScrollableFrame):
     def __init__(self, master, engine, select_callback, rotate_callback, page_action_callback=None, **kwargs):
-        # We use width 280 to accommodate the new checkboxes
-        super().__init__(master, width=280, label_text="Page Navigation", **kwargs)
+        super().__init__(master, width=214, **kwargs)
         self.engine = engine
         self.select_callback = select_callback
         self.rotate_callback = rotate_callback

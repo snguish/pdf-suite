@@ -3,7 +3,11 @@ from PIL import ImageTk
 
 class PDFCanvas(ctk.CTkCanvas):
     def __init__(self, master, **kwargs):
-        super().__init__(master, bg="#1e1e1e", highlightthickness=0, **kwargs)
+        super().__init__(
+            master, bg="#1e1e1e", highlightthickness=2,
+            highlightbackground="#30363d", highlightcolor="#58a6ff",
+            takefocus=True, **kwargs
+        )
         self.image_id = None
         self.tk_image = None
         
@@ -28,6 +32,7 @@ class PDFCanvas(ctk.CTkCanvas):
         self.bind("<Double-Button-1>", self.on_double_click)
         self.bind("<Motion>", self.on_mouse_move)
         self.bind("<MouseWheel>", self.on_mouse_wheel)
+        self.bind("<Button-1>", lambda _event: self.focus_set(), add="+")
 
     def display_page(self, img):
         """Forces a layout refresh to ensure the page is centered in the ACTUAL window space."""

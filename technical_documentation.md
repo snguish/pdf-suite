@@ -21,9 +21,10 @@ Interactive AcroForm filling is implemented for text fields, checkboxes, radio b
 - **PDF engine:** PyMuPDF (`fitz`)
 - **Image handling:** Pillow
 - **Windows packaging:** PyInstaller
+- **Dependency management:** uv
 - **Source control:** Git
 
-Runtime dependencies are declared in `requirements.txt`. Build-only dependencies are declared in `requirements-build.txt`.
+Runtime and build dependencies are declared in `pyproject.toml` and resolved reproducibly through `uv.lock`.
 
 ## 3. Repository structure
 
@@ -32,8 +33,8 @@ pdf-suite/
 |-- app.pyw                    Application entry point
 |-- app_icon.ico               Window and executable icon
 |-- build_windows.ps1          Reproducible Windows build script
-|-- requirements.txt           Runtime dependencies
-|-- requirements-build.txt     Runtime and packaging dependencies
+|-- pyproject.toml             Project metadata and dependency declarations
+|-- uv.lock                    Reproducible dependency lockfile
 |-- README.md                  User-facing instructions
 |-- technical_documentation.md Maintainer documentation
 |-- core/
@@ -47,7 +48,7 @@ pdf-suite/
     `-- math_tools.py          Shared utility functions
 ```
 
-`run_pdf_suite.bat` remains in the repository as a legacy development launcher. Packaged releases should use `PDF Suite.exe` instead.
+Packaged releases use `PDF Suite.exe`. Developers can run `uv sync` followed by `uv run python app.pyw`.
 
 ## 4. Application architecture
 
@@ -194,10 +195,10 @@ Run the following from PowerShell at the repository root:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows.ps1
 ```
 
-The script:
+The script requires `uv` and:
 
-1. Creates or repairs `.build-venv`.
-2. Installs the declared runtime and build dependencies.
+1. Synchronizes the locked runtime and build dependencies into `.build-venv`.
+2. Verifies that dependency resolution matches `uv.lock`.
 3. Runs PyInstaller in windowed, one-folder mode.
 4. Embeds the application icon and includes CustomTkinter assets.
 
