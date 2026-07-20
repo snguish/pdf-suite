@@ -26,14 +26,17 @@ Runtime dependencies are declared in `pyproject.toml`. Build-only dependencies a
 ```text
 pdf-suite/
 |-- app.pyw                     Application entry point
-|-- app_icon.ico                Window and executable icon
-|-- build_windows.ps1           Locked Windows build workflow
-|-- PDF Suite.spec              PyInstaller specification
 |-- pyproject.toml              Project metadata and dependencies
 |-- uv.lock                     Locked dependency graph
+|-- assets/
+|   `-- app_icon.ico            Window and executable icon
 |-- core/
 |   |-- engine.py               PDF rendering and document operations
 |   `-- session.py              Unsaved-change state
+|-- docs/
+|   `-- technical_documentation.md
+|-- scripts/
+|   `-- build_windows.ps1       Locked Windows build workflow
 |-- ui/
 |   |-- canvas.py               Page canvas and pointer interactions
 |   |-- layout.py               Responsive breakpoints and width bounds
@@ -161,7 +164,7 @@ The application prevents deletion of the only remaining page.
 From PowerShell:
 
 ```powershell
-.\build_windows.ps1
+.\scripts\build_windows.ps1
 ```
 
 The script:

@@ -42,7 +42,7 @@ uv run python app.pyw "C:\Documents\sample.pdf"
 Run:
 
 ```powershell
-.\build_windows.ps1
+.\scripts\build_windows.ps1
 ```
 
 The portable application is created at:
@@ -113,4 +113,4 @@ Screenshots are written to `.test-temp\visual-smoke`. The script checks the norm
 - Complex scripted forms and multi-page field groups need broader compatibility testing.
 - The project currently produces a portable folder, not an installer or automatic file association.
 
-See [technical_documentation.md](technical_documentation.md) for architecture and maintainer details.
+See [technical documentation](docs/technical_documentation.md) for architecture and maintainer details.

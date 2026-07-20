@@ -29,7 +29,7 @@ def main():
     
     # --- 3. SET WINDOW ICON (SAFE LOADING) ---
     # We check if the file exists first so the app doesn't crash if it's missing
-    icon_path = resource_path("app_icon.ico")
+    icon_path = resource_path(os.path.join("assets", "app_icon.ico"))
     if os.path.exists(icon_path):
         try:
             root.iconbitmap(icon_path)

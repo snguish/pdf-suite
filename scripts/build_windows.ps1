@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Stop"
-Set-Location -LiteralPath $PSScriptRoot
+$projectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location -LiteralPath $projectRoot
 
 function Invoke-Checked {
     param(
@@ -14,17 +15,18 @@ function Invoke-Checked {
     }
 }
 
-$env:UV_PROJECT_ENVIRONMENT = Join-Path $PSScriptRoot ".build-venv"
+$env:UV_PROJECT_ENVIRONMENT = Join-Path $projectRoot ".build-venv"
 Invoke-Checked { uv sync --locked --group build } "Synchronizing build dependencies"
 
 $buildPython = Join-Path $env:UV_PROJECT_ENVIRONMENT "Scripts\python.exe"
 Invoke-Checked { & $buildPython -m PyInstaller `
     --noconfirm `
     --clean `
+    --specpath build `
     --windowed `
     --name "PDF Suite" `
-    --icon app_icon.ico `
-    --add-data "app_icon.ico;." `
+    --icon assets\app_icon.ico `
+    --add-data "assets\app_icon.ico;assets" `
     --collect-all customtkinter `
     app.pyw } "Building PDF Suite"
 
