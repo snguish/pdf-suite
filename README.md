@@ -19,6 +19,8 @@ Run **`build_windows.ps1`** from PowerShell to create a self-contained applicati
 ### **3. Navigation & Shortcuts**
 Efficiency is the core of this tool. Fixed keyboard variations are supported for both standard and numeric keypad users.
 
+The compact page control displays `‹ [current page] / total ›`. Enter a page number and press **Enter** to jump directly to it. Editing modes are grouped in the vertical tool rail beside the document.
+
 | Key | Action |
 | :--- | :--- |
 | **`Up` / `Down`** | Previous / Next Page |

@@ -20,6 +20,7 @@ class MainWindow:
         self.extraction_mode = False
         self.active_note_coord = None 
         self.pending_signature_bytes = None
+        self._auto_hidden_sidebar = False
         self.form_controls = {}
         self._forms_page_index = None
 
@@ -46,10 +47,13 @@ class MainWindow:
         self.left_group.grid(row=0, column=0, sticky="w", padx=10)
         ctk.CTkButton(self.left_group, text="Open", width=62, command=self.open_file, fg_color="#3d3d3d").pack(side="left", padx=2)
         ctk.CTkButton(self.left_group, text="Save", width=62, command=self.save_overwrite, fg_color="#3d3d3d").pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="Previous", width=70, command=self.prev_page).pack(side="left", padx=(10, 2))
-        self.page_label = ctk.CTkLabel(self.left_group, text="No document", width=84)
-        self.page_label.pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="Next", width=52, command=self.next_page).pack(side="left", padx=2)
+        ctk.CTkButton(self.left_group, text="‹", width=30, command=self.prev_page).pack(side="left", padx=(10, 2))
+        self.page_entry = ctk.CTkEntry(self.left_group, width=42, justify="center", placeholder_text="—")
+        self.page_entry.pack(side="left", padx=2)
+        self.page_entry.bind("<Return>", self.go_to_page_from_entry)
+        self.page_total_label = ctk.CTkLabel(self.left_group, text="/ —", width=42, anchor="w")
+        self.page_total_label.pack(side="left")
+        ctk.CTkButton(self.left_group, text="›", width=30, command=self.next_page).pack(side="left", padx=2)
 
         # Group 2: View Controls
         self.center_group = ctk.CTkFrame(self.ribbon, fg_color="transparent")
@@ -83,11 +87,7 @@ class MainWindow:
         self.save_extract_btn = ctk.CTkButton(self.right_group, text="Save Selection", width=100, fg_color="#28a745", command=self.execute_extraction)
         self.range_entry = ctk.CTkEntry(self.right_group, placeholder_text="e.g. 1-5, 10", width=100)
         self.range_entry.bind("<Return>", lambda e: self.apply_range_from_entry())
-        self.highlight_btn = ctk.CTkButton(self.right_group, text="Highlight", width=80, fg_color="#4a4a4a", command=self.toggle_highlight_mode)
-        self.highlight_btn.pack(side="right", padx=2)
-        self.crop_btn = ctk.CTkButton(self.right_group, text="Crop", width=60, fg_color="#4a4a4a", command=self.toggle_crop_mode)
-        self.crop_btn.pack(side="right", padx=2)
-        self.apply_crop_btn = ctk.CTkButton(self.right_group, text="Apply", width=60, fg_color="#28a745", command=self.apply_crop)
+        self.apply_crop_btn = ctk.CTkButton(self.right_group, text="Apply Crop", width=84, fg_color="#28a745", command=self.apply_crop)
 
         # --- PANELS ---
         self.left_panel = ctk.CTkFrame(self.root, width=280, corner_radius=0)
@@ -98,9 +98,20 @@ class MainWindow:
         self.splitter.grid(row=1, column=1, sticky="nsew")
         self.canvas_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         self.canvas_frame.grid(row=1, column=2, sticky="nsew")
-        self.canvas_frame.grid_rowconfigure(0, weight=1); self.canvas_frame.grid_columnconfigure(0, weight=1)
+        self.canvas_frame.grid_rowconfigure(0, weight=1); self.canvas_frame.grid_columnconfigure(1, weight=1)
+        self.tool_rail = ctk.CTkFrame(self.canvas_frame, width=72, corner_radius=0)
+        self.tool_rail.grid(row=0, column=0, sticky="ns")
+        ctk.CTkLabel(self.tool_rail, text="TOOLS", font=("Segoe UI", 9, "bold"), text_color="#999999").pack(pady=(10, 6))
+        self.pointer_btn = ctk.CTkButton(self.tool_rail, text="Pointer", width=62, command=self.activate_pointer_mode)
+        self.pointer_btn.pack(padx=5, pady=3)
+        self.highlight_btn = ctk.CTkButton(self.tool_rail, text="Highlight", width=62, fg_color="#3d3d3d", command=self.toggle_highlight_mode)
+        self.highlight_btn.pack(padx=5, pady=3)
+        self.crop_btn = ctk.CTkButton(self.tool_rail, text="Crop", width=62, fg_color="#3d3d3d", command=self.toggle_crop_mode)
+        self.crop_btn.pack(padx=5, pady=3)
+        ctk.CTkButton(self.tool_rail, text="Forms", width=62, fg_color="#3d3d3d", command=lambda: self.open_context_tab("Forms")).pack(padx=5, pady=(14, 3))
+        ctk.CTkButton(self.tool_rail, text="Sign", width=62, fg_color="#3d3d3d", command=lambda: self.open_context_tab("Sign")).pack(padx=5, pady=3)
         self.canvas = PDFCanvas(self.canvas_frame)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.canvas.grid(row=0, column=1, sticky="nsew")
         
         # Reusable contextual workspace (hidden initially)
         self.inspector_panel = ctk.CTkFrame(self.root, width=280, corner_radius=0, border_width=1, border_color="#333333")
@@ -311,6 +322,11 @@ class MainWindow:
     # --- INSPECTOR LOGIC ---
     def show_inspector(self):
         if not self.inspector_visible:
+            if self.root.winfo_width() < 1180 and self.sidebar_visible:
+                self.left_panel.grid_remove()
+                self.splitter.configure(text="»")
+                self.sidebar_visible = False
+                self._auto_hidden_sidebar = True
             self.inspector_panel.grid(row=1, column=3, sticky="nsew")
             self.inspector_visible = True
             self.context_btn.configure(text="Hide Details", width=88)
@@ -321,7 +337,16 @@ class MainWindow:
             self.inspector_panel.grid_remove()
             self.inspector_visible = False; self.active_note_coord = None
             self.context_btn.configure(text="Details", width=68)
+            if self._auto_hidden_sidebar and self.root.winfo_width() >= 850:
+                self.left_panel.grid()
+                self.splitter.configure(text="«")
+                self.sidebar_visible = True
+            self._auto_hidden_sidebar = False
             self.root.after(50, self.zoom_to_fit)
+
+    def open_context_tab(self, tab_name):
+        self.show_inspector()
+        self.context_tabs.set(tab_name)
 
     def toggle_inspector(self):
         if self.inspector_visible:
@@ -591,6 +616,7 @@ class MainWindow:
             self.toggle_crop_mode()
         self.pending_signature_bytes = image_bytes
         self.canvas.set_modes(signature=True)
+        self.pointer_btn.configure(fg_color="#3d3d3d")
         self.context_tabs.set("Sign")
         self.show_inspector()
         self.signature_status.configure(text=f"Ready: {description}\nDrag a rectangle on the page. Press Esc to cancel.", text_color="#2f9bff")
@@ -598,6 +624,7 @@ class MainWindow:
     def cancel_signature_placement(self):
         self.pending_signature_bytes = None
         self.canvas.set_modes(signature=False)
+        self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
         self.signature_status.configure(text="Choose a signature, then drag its area on the page.", text_color="#aaaaaa")
 
     def apply_signature(self):
@@ -656,10 +683,12 @@ class MainWindow:
         is_on = self.highlight_btn.cget("text") == "Cancel Highlight"
         if not is_on:
             self.highlight_btn.configure(text="Cancel Highlight", fg_color="#d39e00")
+            self.pointer_btn.configure(fg_color="#3d3d3d")
             self.snap_switch.pack(side="left", padx=10); self.canvas.set_modes(highlight=True)
         else:
             self.highlight_btn.configure(text="Highlight", fg_color="#4a4a4a")
             self.snap_switch.pack_forget(); self.canvas.set_modes(highlight=False)
+            self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
 
     def toggle_crop_mode(self):
         if self.highlight_btn.cget("text") == "Cancel Highlight": self.toggle_highlight_mode()
@@ -667,10 +696,25 @@ class MainWindow:
         is_on = self.crop_btn.cget("text") == "Cancel Crop"
         if not is_on:
             self.crop_btn.configure(text="Cancel Crop", fg_color="#d35b5b")
+            self.pointer_btn.configure(fg_color="#3d3d3d")
             self.apply_crop_btn.pack(side="right", padx=5); self.canvas.set_modes(crop=True)
         else:
             self.crop_btn.configure(text="Crop", fg_color="#4a4a4a")
             self.apply_crop_btn.pack_forget(); self.canvas.set_modes(crop=False)
+            self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
+
+    def activate_pointer_mode(self):
+        if self.highlight_btn.cget("text") == "Cancel Highlight":
+            self.highlight_btn.configure(text="Highlight", fg_color="#4a4a4a")
+            self.snap_switch.pack_forget()
+        if self.crop_btn.cget("text") == "Cancel Crop":
+            self.crop_btn.configure(text="Crop", fg_color="#4a4a4a")
+            self.apply_crop_btn.pack_forget()
+        if self.canvas.signature_mode:
+            self.pending_signature_bytes = None
+            self.signature_status.configure(text="Choose a signature, then drag its area on the page.", text_color="#aaaaaa")
+        self.canvas.set_modes()
+        self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"))
 
     def apply_crop(self):
         px = self.canvas.get_selection_pixels()
@@ -691,7 +735,9 @@ class MainWindow:
             if self.sidebar:
                 self.sidebar.highlight_active(idx)
                 self.root.after(200, lambda: self.sidebar.scroll_to_page(idx))
-            self.page_label.configure(text=f"{idx + 1} / {len(self.engine.doc)}")
+            self.page_entry.delete(0, "end")
+            self.page_entry.insert(0, str(idx + 1))
+            self.page_total_label.configure(text=f"/ {len(self.engine.doc)}")
             self.status_label.configure(text=f" Page {idx+1} of {len(self.engine.doc)}")
             if self._forms_page_index != idx:
                 self.refresh_form_fields()
@@ -762,7 +808,20 @@ class MainWindow:
     def toggle_sidebar(self):
         if self.sidebar_visible: self.left_panel.grid_remove(); self.splitter.configure(text="»")
         else: self.left_panel.grid(); self.splitter.configure(text="«")
+        self._auto_hidden_sidebar = False
         self.sidebar_visible = not self.sidebar_visible; self.root.after(50, self.zoom_to_fit)
+
+    def go_to_page_from_entry(self, event=None):
+        if not self.engine:
+            return "break"
+        try:
+            page_number = int(self.page_entry.get().strip())
+        except ValueError:
+            page_number = self.current_page_index + 1
+        page_number = max(1, min(page_number, len(self.engine.doc)))
+        self.load_page(page_number - 1)
+        self.canvas.focus_set()
+        return "break"
 
     def next_page(self):
         if self.engine and self.current_page_index < len(self.engine.doc)-1: self.load_page(self.current_page_index + 1)

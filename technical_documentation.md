@@ -91,12 +91,16 @@ The current layout is:
 
 ```text
 Menu bar
-Compact toolbar with page counter and Fit Page/Fit Width controls
-Thumbnail panel | Document canvas | Contextual Details workspace
+Compact toolbar with direct page input and Fit Page/Fit Width controls
+Thumbnail panel | Vertical tool rail | Document canvas | Contextual Details workspace
 Status bar
 ```
 
 The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the annotation workflow. Forms dynamically displays widgets found on the current PDF page. Sign creates and places visual signatures while clearly distinguishing them from certificate-backed signatures.
+
+The toolbar uses a compact `previous | page entry / total | next` control. Page input is clamped to the available document range. Pointer, Highlight, Crop, Forms, and Sign actions are grouped in a vertical rail beside the canvas, leaving the top toolbar focused on file, navigation, and view commands.
+
+Pointer is the neutral interaction mode. It cancels active highlight, crop, or signature placement state. At window widths below 1180 pixels, opening Details automatically hides the thumbnail panel; closing Details restores thumbnails when at least 850 pixels are available. This prevents both side panels from compressing the document into an unusably narrow area.
 
 The Forms tab maps PDF widget types to native controls:
 
@@ -246,7 +250,7 @@ The following work remains:
 2. Add selection, movement, and post-placement resizing for visual signatures.
 3. Add an explicit form-flattening export option.
 4. Expand form testing for complex radio groups, scripts, validation, and fields spanning multiple pages.
-5. Continue responsive-layout testing and retire remaining legacy toolbar behavior.
+5. Continue responsive-layout testing, add narrow-window drawers, and refine tool-rail icons/tooltips.
 6. Improve thumbnail worker isolation and cancellation for large PDFs.
 7. Expand automated GUI coverage.
 8. Add a Windows installer and optional file-association registration.
