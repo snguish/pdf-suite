@@ -37,13 +37,8 @@ def main():
             # Silently skip if the icon format is invalid or locked
             pass
 
-    # --- 4. ROBUST SPACE-PROOF PATH PARSING ---
-    initial_file = None
-    if len(sys.argv) > 1:
-        # Join all arguments in case Windows split the path due to spaces.
-        # Then strip any extra quotes that Windows/Batch often double-wrap.
-        full_path = " ".join(sys.argv[1:])
-        initial_file = full_path.replace('"', '').strip()
+    # Python and Windows preserve a quoted path as one argument.
+    initial_file = sys.argv[1] if len(sys.argv) > 1 else None
 
     # --- 5. LAUNCH THE APPLICATION ---
     try:

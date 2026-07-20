@@ -108,12 +108,12 @@ class PDFEngine:
         if words:
             lines = {}
             for w in words:
-                l_idx = w[6]
-                if l_idx not in lines:
-                    lines[l_idx] = list(w[:4])
+                line_key = (w[5], w[6])
+                if line_key not in lines:
+                    lines[line_key] = list(w[:4])
                 else:
-                    lines[l_idx][0], lines[l_idx][1] = min(lines[l_idx][0], w[0]), min(lines[l_idx][1], w[1])
-                    lines[l_idx][2], lines[l_idx][3] = max(lines[l_idx][2], w[2]), max(lines[l_idx][3], w[3])
+                    lines[line_key][0], lines[line_key][1] = min(lines[line_key][0], w[0]), min(lines[line_key][1], w[1])
+                    lines[line_key][2], lines[line_key][3] = max(lines[line_key][2], w[2]), max(lines[line_key][3], w[3])
             return list(lines.values())
         return [pdf_coords]
 
@@ -184,10 +184,12 @@ class PDFEngine:
 
     def extract_pages(self, page_indices, output_path):
         new_doc = fitz.open()
-        for idx in sorted(page_indices):
-            new_doc.insert_pdf(self.doc, from_page=idx, to_page=idx)
-        new_doc.save(output_path)
-        new_doc.close()
+        try:
+            for idx in sorted(page_indices):
+                new_doc.insert_pdf(self.doc, from_page=idx, to_page=idx)
+            new_doc.save(output_path)
+        finally:
+            new_doc.close()
 
     def append_documents(self, filepaths):
         """Append complete PDFs atomically, leaving the current document intact on failure."""

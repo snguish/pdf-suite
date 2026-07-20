@@ -1,5 +1,4 @@
 import customtkinter as ctk
-import threading
 from tkinter import Menu
 
 class Sidebar(ctk.CTkScrollableFrame):
@@ -10,24 +9,26 @@ class Sidebar(ctk.CTkScrollableFrame):
         self.rotate_callback = rotate_callback
         self.page_action_callback = page_action_callback
         
-        self.is_running = True
+        self._thumbnail_job = None
         self.extraction_mode = False 
         self.buttons = {}
         self.checkboxes = {}
         self.frames = {} # NEW: Tracks the container frame for accurate scrolling
         self.selected_pages = set()
 
-        # Load thumbnails in a separate thread to keep UI snappy
-        self.loader_thread = threading.Thread(target=self._load_thumbnails, daemon=True)
-        self.loader_thread.start()
+        self._thumbnail_job = self.after_idle(self._load_next_thumbnail, 0)
 
     def stop_loading(self):
-        self.is_running = False
+        if self._thumbnail_job is not None:
+            self.after_cancel(self._thumbnail_job)
+            self._thumbnail_job = None
 
-    def _load_thumbnails(self):
-        for i in range(len(self.engine.doc)):
-            if not self.is_running: return
-            self.after(10, lambda idx=i: self.refresh_thumbnail(idx))
+    def _load_next_thumbnail(self, index):
+        self._thumbnail_job = None
+        if index >= len(self.engine.doc) or not self.winfo_exists():
+            return
+        self.refresh_thumbnail(index)
+        self._thumbnail_job = self.after(10, self._load_next_thumbnail, index + 1)
 
     def toggle_extraction_mode(self, enabled):
         """Shows or hides checkboxes for the Extract Page(s) feature."""

@@ -1,153 +1,137 @@
-# PDF Suite Technical Documentation
+# PDF Suite technical documentation
 
-**Current development version:** 1.1
+- **Version:** 1.1.0
+- **Platform:** Windows desktop
+- **Last verified:** July 20, 2026
 
-**Platform:** Windows desktop
+## 1. Scope
 
-**Last updated:** July 2026
+PDF Suite is a local desktop PDF review and organization tool. It renders documents, manages pages, creates annotations, fills AcroForms, and places visual signatures. Document content, annotations, signature images, and user information remain local.
 
-## 1. Purpose and scope
-
-PDF Suite is a local desktop application for reviewing and organizing PDF documents. It supports page rendering and navigation, audit-aware highlights and notes, cropping, page extraction, PDF combining, page reordering, rotation, image snapshots, and note export.
-
-All document processing is local. The application does not upload PDFs, annotations, signatures, or user information to a remote service.
-
-Interactive AcroForm filling is implemented for text fields, checkboxes, radio buttons, combo boxes, and list boxes. Visual signatures can be imported, typed, or drawn and placed as flattened page content. Certificate-backed cryptographic signing is a separate advanced capability and is not currently implemented.
+The application does not implement certificate-backed digital signing. A placed signature is flattened image content and provides no identity or integrity guarantee.
 
 ## 2. Technology stack
 
-- **Language:** Python 3
-- **GUI:** CustomTkinter and Tk
-- **PDF engine:** PyMuPDF (`fitz`)
-- **Image handling:** Pillow
-- **Windows packaging:** PyInstaller
-- **Dependency management:** uv
-- **Source control:** Git
+- Python 3.11+
+- CustomTkinter and Tk for the desktop interface
+- PyMuPDF (`fitz`) for PDF rendering and mutation
+- Pillow for image conversion and signature creation
+- uv with `uv.lock` for dependency management
+- PyInstaller for the portable Windows build
 
-Runtime and build dependencies are declared in `pyproject.toml` and resolved reproducibly through `uv.lock`.
+Runtime dependencies are declared in `pyproject.toml`. Build-only dependencies are in the `build` dependency group.
 
-## 3. Repository structure
+## 3. Repository layout
 
 ```text
 pdf-suite/
-|-- app.pyw                    Application entry point
-|-- app_icon.ico               Window and executable icon
-|-- build_windows.ps1          Reproducible Windows build script
-|-- pyproject.toml             Project metadata and dependency declarations
-|-- uv.lock                    Reproducible dependency lockfile
-|-- README.md                  User-facing instructions
-|-- technical_documentation.md Maintainer documentation
+|-- app.pyw                     Application entry point
+|-- app_icon.ico                Window and executable icon
+|-- build_windows.ps1           Locked Windows build workflow
+|-- PDF Suite.spec              PyInstaller specification
+|-- pyproject.toml              Project metadata and dependencies
+|-- uv.lock                     Locked dependency graph
 |-- core/
-|   |-- engine.py              PDF rendering, annotation, and page operations
-|   `-- session.py             Session and unsaved-change state
+|   |-- engine.py               PDF rendering and document operations
+|   `-- session.py              Unsaved-change state
 |-- ui/
-|   |-- main_window.py         Window layout, menus, commands, and coordination
-|   |-- canvas.py              Rendering surface and pointer interaction
-|   `-- sidebar.py             Thumbnails, selection, and page context actions
-`-- utils/
-    `-- math_tools.py          Shared utility functions
+|   |-- canvas.py               Page canvas and pointer interactions
+|   |-- layout.py               Responsive breakpoints and width bounds
+|   |-- main_window.py          UI composition and command coordination
+|   |-- menu_bar.py             Dark in-window menu and popups
+|   |-- sidebar.py              Progressive thumbnails and page actions
+|   `-- tooltip.py              Pointer and keyboard-focus tooltips
+`-- tests/
+    |-- test_engine_forms.py
+    |-- test_engine_signatures.py
+    |-- test_layout.py
+    `-- visual_smoke.ps1
 ```
 
-Packaged releases use `PDF Suite.exe`. Developers can run `uv sync` followed by `uv run python app.pyw`.
+Generated environments, build output, and smoke-test artifacts are excluded through `.gitignore`.
 
-## 4. Application architecture
+## 4. Architecture
 
-### 4.1 Entry layer
+### Entry point
 
-`app.pyw` configures CustomTkinter, creates the root window, resolves bundled resources, reads an optional PDF path from the Windows command line, and starts `MainWindow`.
+`app.pyw` configures the dark CustomTkinter theme, creates the root window, resolves bundled resources through `sys._MEIPASS` when packaged, accepts an optional PDF path as the first command-line argument, and starts `MainWindow`.
 
-Resource lookup supports both source execution and PyInstaller's temporary bundle location through `sys._MEIPASS`. This ensures that `app_icon.ico` works in development and in the packaged executable.
+### Session state
 
-### 4.2 Session layer
+`SessionManager` owns the `unsaved_changes` flag and exposes explicit changed, saved, and reset transitions. The window title shows an asterisk for unsaved changes. Opening another document or closing the window asks before discarding them.
 
-`SessionManager` owns transient document state:
+### PDF engine
 
-- `unsaved_changes` indicates whether the open document differs from its saved source.
-- `history` is reserved for the planned undo/redo implementation.
-- `mark_changed()`, `mark_saved()`, and `reset()` provide explicit state transitions.
+`PDFEngine` owns the active PyMuPDF document and provides:
 
-The window title contains an asterisk when changes are unsaved. Opening another document or closing the window requires confirmation before those changes are discarded.
+- Full-page and thumbnail rendering.
+- Form-widget discovery and updates by cross-reference ID.
+- Highlight creation and audit-note metadata.
+- Note reading, editing, deletion, and CSV report data.
+- Visual-signature image insertion with aspect-ratio preservation.
+- Crop, rotation, movement, deletion, extraction, and combining operations.
+- Incremental overwrite of a source-backed PDF and full saves for copies.
 
-### 4.3 PDF engine
+Combining is transactional at the application level: sources are inserted into a separate in-memory document, and the active document is replaced only after every insertion succeeds. Temporary documents and opened sources are closed through explicit cleanup paths.
 
-`PDFEngine` wraps the active PyMuPDF document. Its responsibilities include:
+Text-snap highlighting groups extracted words by both PyMuPDF block and line identifiers. This prevents unrelated text blocks with matching line numbers from being merged into one highlight rectangle.
 
-- Rendering full pages and thumbnails.
-- Detecting interactive form widgets and updating their values by PDF cross-reference ID.
-- Inserting visual signatures as proportionally fitted page images.
-- Rotating, cropping, moving, deleting, and extracting pages.
-- Atomically combining the active document with additional PDFs.
-- Creating, reading, editing, deleting, and exporting highlight notes.
-- Saving incrementally when overwriting a source-backed document.
-- Performing a full save for a new in-memory combined document or a copy.
-- Closing the native PDF handle when a document is replaced or the window closes.
+### User interface
 
-The combine operation constructs a separate in-memory document and only replaces the active document after all selected sources have been inserted successfully. This prevents a failed source from leaving a partially combined active document.
+`MainWindow` owns the application workflow and connects the engine, canvas, sidebar, menus, dialogs, session state, and Details panel.
 
-### 4.4 User-interface layer
-
-`MainWindow` coordinates commands and document state. Version 1.1 introduces File, Pages, and View menus together with a compact toolbar for common navigation, saving, zoom, and editing actions.
-
-The current layout is:
+The main layout is:
 
 ```text
-Menu bar
-Compact toolbar with direct page input and Fit Page/Fit Width controls
-Thumbnail panel | Vertical tool rail | Document canvas | Contextual Details workspace
+Dark menu bar
+File, page, zoom, Details, and File Actions toolbar
+Thumbnail panel | Tool rail | PDF canvas | Details workspace
 Status bar
 ```
 
-The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the annotation workflow. Forms dynamically displays widgets found on the current PDF page. Sign creates and places visual signatures while clearly distinguishing them from certificate-backed signatures.
+The custom dark menu is intentional. Native `tkinter.Menu` uses the Windows system appearance and does not match the established dark interface.
 
-The toolbar uses a compact `previous | page entry / total | next` control. Page input is clamped to the available document range. Pointer, Highlight, Crop, Forms, and Sign actions are grouped in a vertical rail beside the canvas, leaving the top toolbar focused on file, navigation, and view commands.
+`PDFCanvas` owns the rendered page image, scrolling, panning, selection rectangles, and mouse-event routing. Crop, highlight, and signature operations use one shared conversion path that clamps selections to the current page and rejects undersized rectangles.
 
-Pointer is the neutral interaction mode. It cancels active highlight, crop, or signature placement state. At window widths below 1180 pixels, opening Details automatically hides the thumbnail panel; closing Details restores thumbnails when at least 850 pixels are available. This prevents both side panels from compressing the document into an unusably narrow area.
+`Sidebar` creates thumbnails incrementally through cancellable Tk callbacks. Rendering and widget updates stay on Tk's owning thread, and the event loop receives time between pages. Replacing or closing a document cancels the outstanding thumbnail job.
 
-The Forms tab maps PDF widget types to native controls:
+## 5. Responsive layout
 
-- Text and otherwise unsupported editable values use text entries.
-- Checkboxes use boolean controls and the widget's real PDF on-state.
-- Radio widgets with the same field name are grouped as radio options.
-- Combo boxes and list boxes use the choices embedded in the PDF.
-- Read-only fields are displayed but disabled.
-- Certificate signature fields are identified but cannot be edited by the form workflow.
+Layout decisions are isolated in `ui/layout.py`:
 
-Controls are cached while the current page is rerendered, preventing zoom changes from discarding unsubmitted entry text. **Apply Form Changes** writes the visible controls to PyMuPDF widgets, rerenders the page, and marks the document unsaved.
+- Below 850 pixels: drawer layout.
+- From 850 through 1179 pixels: compact layout.
+- At 1180 pixels and above: wide layout.
+- Sidebar width is bounded from 176 through 360 pixels, with a default of 224 pixels.
 
-The Sign tab supports three visual-signature sources:
+At narrower sizes, the toolbar wraps to two rows. Thumbnails and Details behave as temporary drawers so they do not compress the document canvas beyond usability.
 
-- Imported PNG, JPEG, or BMP images, normalized to PNG before insertion.
-- Typed signer names rendered with an available Windows handwriting or italic font.
-- Mouse-drawn strokes captured in a dedicated signature pad and converted to a cropped transparent PNG.
+## 6. Forms
 
-After choosing a signature, the canvas enters signature-placement mode. The user drags a rectangle that defines its location and maximum size. Coordinates are clamped to the visible PDF page, and undersized rectangles are rejected. PyMuPDF inserts the image with its aspect ratio preserved and marks the document unsaved. Pressing Escape cancels placement.
+The Forms tab maps PyMuPDF widgets to CustomTkinter controls:
 
-Placed visual signatures are permanent page image content. They cannot currently be selected, moved, or resized after placement, except by discarding unsaved changes. They do not prove signer identity or protect the document from later modification.
+- Text and unsupported editable values use text entries.
+- Checkboxes use boolean controls and the PDF widget's on-state.
+- Radio widgets sharing a field name are presented as a group.
+- Combo boxes and list boxes use their embedded choices.
+- Read-only widgets are visible but disabled.
+- Certificate-signature fields are identified but not edited.
 
-The Pages menu and thumbnail context menu expose document organization commands. After page structure changes, the thumbnail view is rebuilt against the updated document.
+Controls are retained while the same page rerenders, so zooming does not discard unsubmitted values. **Apply Form Changes** writes controls to the PDF widgets, rerenders the page, and marks the session changed. Navigating away without applying can discard pending UI values.
 
-`PDFCanvas` owns pointer coordinates, selection rectangles, panning, and wheel-event routing. It prevents handled wheel events from propagating to the root window twice.
+## 7. Visual signatures
 
-`Sidebar` loads thumbnails progressively and provides page selection plus context actions for rotation, movement, and deletion.
+The Sign tab accepts:
 
-## 5. Navigation and input behavior
+- PNG, JPEG, or BMP files, normalized to PNG.
+- Typed names rendered with an available Windows script or italic font.
+- Mouse-drawn strokes converted to a cropped transparent PNG.
 
-Normal mouse-wheel input changes pages. `Ctrl + Mouse Wheel` zooms around the pointer position rather than the center of the page.
+After choosing a source, the user drags a bounded placement rectangle. Rectangles smaller than 10 PDF points in either dimension are rejected. The image is inserted proportionally and becomes page content. Escape cancels pending placement.
 
-Cursor-focused zoom follows this sequence:
+## 8. Annotations and exported notes
 
-1. Translate the pointer's canvas position into a PDF coordinate at the old zoom.
-2. Render the page at the bounded new zoom level.
-3. Calculate the PDF coordinate's new canvas position.
-4. Adjust the canvas view so that the same document location remains beneath the pointer.
-
-Zoom is constrained to 10–800 percent. Fit Page considers both available height and width. Fit Width uses 96 percent of the canvas width and is available through the toolbar, View menu, and `Ctrl + 2`.
-
-Single-letter document shortcuts are ignored when an Entry, Text, ComboBox, or Spinbox has focus. This prevents commands such as crop, highlight, or sidebar toggle from firing while a user types.
-
-## 6. Annotation and audit metadata
-
-Highlights store structured text in the PDF annotation content:
+Highlight annotations store content in this format:
 
 ```text
 CREATED: <user> @ <timestamp>
@@ -156,105 +140,74 @@ MODIFIED: <user> @ <timestamp>
 <comment>
 ```
 
-Editing a note preserves its original `CREATED` line and replaces the `MODIFIED` identity and timestamp. CSV note export includes page, user, creation time, last-modified time, and comment.
+Editing preserves the original creation line and replaces the modified identity and timestamp. This metadata is useful for review traceability but is not cryptographically protected.
 
-The metadata improves traceability but is not a cryptographic audit mechanism. Anyone with a capable PDF editor can alter annotation metadata.
+CSV export contains page, user, creation time, last-modified time, and comment. String cells beginning with `=`, `+`, `-`, or `@` after leading whitespace are prefixed before writing to reduce spreadsheet formula-injection risk.
 
-## 7. Saving and document lifecycle
+## 9. Saving and page operations
 
-Document-changing operations call `mark_document_changed()`. This currently includes highlights, note edits, note deletion, cropping, rotation, combining, page movement, and page deletion.
+Document-changing operations mark the session unsaved. These include form updates, signatures, highlights, note edits and deletion, cropping, rotation, combining, page movement, and page deletion.
 
-Saving behavior is divided into two paths:
+- **Update Original File** uses an incremental save when the active PyMuPDF document is backed by the same path.
+- **Save Copy as PDF** performs a full save and does not change the original association.
+- Combined in-memory documents use a full save.
 
-- **Update Original File:** uses incremental saving when the PyMuPDF document is still backed by the same source path.
-- **Save Copy as PDF:** performs a full save to a new path and leaves the original document association unchanged.
+Page extraction accepts checkbox selections or comma-separated, inclusive ranges such as `1-5, 10`. Invalid syntax is reported; out-of-range page numbers are ignored. Extraction closes its temporary document even when saving fails.
 
-Combined documents are created in memory and therefore have no PyMuPDF source name. They use a full save even when the user elects to update the path originally opened by the application.
+The application prevents deletion of the only remaining page.
 
-Open and save failures are presented through user-facing dialogs. An existing PDF engine is replaced only after a new document has opened successfully.
+## 10. Build and distribution
 
-## 8. Page organization
-
-The following page operations are implemented:
-
-- Combine one or more PDFs with the active document.
-- Extract checkbox-selected pages or a typed page range.
-- Rotate a page by 90 degrees.
-- Move a page one position up or down.
-- Delete a page after confirmation.
-
-Deletion of the only remaining page is rejected because a valid PDF must contain at least one page.
-
-The typed range parser accepts comma-separated pages and inclusive ranges, for example `1-5, 10`. Invalid syntax produces an error dialog, while page numbers outside the document are ignored.
-
-## 9. Windows executable build
-
-Run the following from PowerShell at the repository root:
+From PowerShell:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows.ps1
+.\build_windows.ps1
 ```
 
-The script requires `uv` and:
+The script:
 
-1. Synchronizes the locked runtime and build dependencies into `.build-venv`.
-2. Verifies that dependency resolution matches `uv.lock`.
+1. Sets `.build-venv` as the uv project environment.
+2. Synchronizes locked runtime and build dependencies.
 3. Runs PyInstaller in windowed, one-folder mode.
-4. Embeds the application icon and includes CustomTkinter assets.
+4. Embeds the icon and collects CustomTkinter assets.
 
-The output is:
+Output:
 
 ```text
 dist\PDF Suite\PDF Suite.exe
 ```
 
-The complete `dist\PDF Suite` directory is the portable application. The executable should not be distributed without its adjacent `_internal` content.
-
-One-folder packaging is intentional for the initial release because it starts faster and makes missing-resource problems easier to diagnose than one-file extraction.
-
-## 10. Git workflow
-
-Modernization work is isolated on:
-
-```text
-feature/modernize-pdf-suite
-```
-
-The first modernization milestone is recorded by commit:
-
-```text
-82707b9 Modernize PDF navigation and document workflow
-```
-
-Generated environments and PyInstaller output are excluded by `.gitignore`.
+Ship the entire `dist\PDF Suite` directory. One-folder packaging is intentional for predictable startup and easier resource diagnosis.
 
 ## 11. Verification
 
-The current milestone has been checked with:
+Automated verification:
 
-- Python bytecode compilation for the application modules.
-- `git diff --check` for patch formatting errors.
-- An integration test that generates PDFs, combines them, reorders pages, deletes a page, saves the result, reopens it, and validates page content.
-- An automated form-engine test that creates an AcroForm, detects text/checkbox/choice widgets, updates their values, saves, reopens, and validates persisted values.
-- A Forms-tab construction test that verifies dynamic controls and preservation of unsubmitted text across same-page rerenders.
-- Automated signature-engine tests that embed a transparent signature image, reopen the PDF, verify the page image, and reject invalid placement rectangles.
-- A signature UI smoke test covering typed-image generation, placement activation/cancellation, and selection-handler preservation.
-- A successful PyInstaller Windows build.
+```powershell
+$env:PDF_SUITE_TEST_TMP = (Resolve-Path ".test-temp").Path
+.\.build-venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.build-venv\Scripts\python.exe -m compileall -q app.pyw core ui
+git diff --check
+```
 
-Interactive GUI testing is still required for pointer positioning, high-DPI behavior, menus, dialogs, and Windows file association before release.
+The current suite contains five tests covering form persistence, signature insertion and minimum-size rejection, responsive breakpoints, and sidebar width bounds.
 
-## 12. Known limitations and roadmap
+Packaged visual verification:
 
-The following work remains:
+```powershell
+.\tests\visual_smoke.ps1 -PdfPath ".\sample.pdf"
+```
 
-1. Add undo and redo using the reserved session history.
-2. Add selection, movement, and post-placement resizing for visual signatures.
-3. Add an explicit form-flattening export option.
-4. Expand form testing for complex radio groups, scripts, validation, and fields spanning multiple pages.
-5. Continue responsive-layout testing, add narrow-window drawers, and refine tool-rail icons/tooltips.
-6. Improve thumbnail worker isolation and cancellation for large PDFs.
-7. Expand automated GUI coverage.
-8. Add a Windows installer and optional file-association registration.
-9. Evaluate certificate-backed digital signatures as a separate security-focused project.
+The smoke script launches the built executable and captures normal, Details, Forms, Sign, 800x600, and 1024x768 states. On July 20, 2026, the source tests, compilation, Windows build, and packaged visual smoke check all completed successfully.
 
-Visual signatures must not be described as digital signatures. A visual mark does not validate document integrity or signer identity. Cryptographic signing requires certificate handling, byte-range signing, validation, and preservation rules beyond the current annotation and image workflows.
+The smoke script verifies launch and visible layout states; it does not automate every destructive edit or save workflow.
+
+## 12. Known limitations
+
+- Undo and redo are not implemented.
+- Placed visual signatures cannot be selected, moved, or resized.
+- Certificate-backed PDF signing and validation are not implemented.
+- Complex scripted forms, radio-group edge cases, and fields spanning pages require broader testing.
+- Thumbnail rendering is incremental but remains CPU work on the UI thread.
+- Automated GUI coverage is limited to screenshot-based smoke checks.
+- Distribution is a portable folder; there is no installer or automatic file-association registration.

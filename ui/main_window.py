@@ -424,6 +424,23 @@ class MainWindow:
         offset_x, offset_y = (max(cw, rw) - rw) / 2, (max(ch, rh) - rh) / 2
         return (cx - offset_x) / self.current_zoom, (cy - offset_y) / self.current_zoom
 
+    def get_selection_pdf_rect(self, minimum_size=1):
+        pixels = self.canvas.get_selection_pixels()
+        if not pixels or not self.engine:
+            return None
+        p1 = self.get_pdf_coords(pixels[0], pixels[1])
+        p2 = self.get_pdf_coords(pixels[2], pixels[3])
+        page = self.engine.doc[self.current_page_index].rect
+        rect = (
+            max(page.x0, min(p1[0], p2[0])),
+            max(page.y0, min(p1[1], p2[1])),
+            min(page.x1, max(p1[0], p2[0])),
+            min(page.y1, max(p1[1], p2[1])),
+        )
+        if rect[2] - rect[0] < minimum_size or rect[3] - rect[1] < minimum_size:
+            return None
+        return rect
+
     # --- SAVE / EXPORT ---
     def handle_save_action(self, choice):
         if choice == "Update Original File": self.save_overwrite()
@@ -759,19 +776,8 @@ class MainWindow:
     def apply_signature(self):
         if not self.canvas.signature_mode or not self.pending_signature_bytes or not self.engine:
             return
-        pixels = self.canvas.get_selection_pixels()
-        if not pixels:
-            return
-        p1 = self.get_pdf_coords(pixels[0], pixels[1])
-        p2 = self.get_pdf_coords(pixels[2], pixels[3])
-        page_rect = self.engine.doc[self.current_page_index].rect
-        rect = (
-            max(page_rect.x0, min(p1[0], p2[0])),
-            max(page_rect.y0, min(p1[1], p2[1])),
-            min(page_rect.x1, max(p1[0], p2[0])),
-            min(page_rect.y1, max(p1[1], p2[1])),
-        )
-        if rect[2] - rect[0] < 10 or rect[3] - rect[1] < 10:
+        rect = self.get_selection_pdf_rect(minimum_size=10)
+        if not rect:
             messagebox.showwarning("Visual Signature", "Drag a larger signature area.")
             return
         try:
@@ -796,12 +802,14 @@ class MainWindow:
 
     def apply_highlight(self, event):
         if not self.canvas.highlight_mode: return
-        px = self.canvas.get_selection_pixels()
-        if px:
-            p1, p2 = self.get_pdf_coords(px[0], px[1]), self.get_pdf_coords(px[2], px[3])
-            rect = (min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1]))
-            rects = self.engine.get_text_in_rect(self.current_page_index, rect) if self.snap_var.get() else [rect]
-            self.engine.add_highlight(self.current_page_index, rects)
+        rect = self.get_selection_pdf_rect()
+        if rect:
+            try:
+                rects = self.engine.get_text_in_rect(self.current_page_index, rect) if self.snap_var.get() else [rect]
+                self.engine.add_highlight(self.current_page_index, rects)
+            except Exception as exc:
+                messagebox.showerror("Highlight Error", f"Could not add the highlight:\n{exc}")
+                return
             self.mark_document_changed()
             self.load_page(self.current_page_index); self.sidebar.refresh_thumbnail(self.current_page_index)
             self.focus_note_in_inspector(rect[:2]); self.toggle_highlight_mode()
@@ -846,11 +854,13 @@ class MainWindow:
         self.pointer_btn.configure(fg_color=("#3B8ED0", "#1F6AA5"), border_width=2, border_color="#8cc8ff")
 
     def apply_crop(self):
-        px = self.canvas.get_selection_pixels()
-        if px:
-            p1, p2 = self.get_pdf_coords(px[0], px[1]), self.get_pdf_coords(px[2], px[3])
-            rect = (min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1]))
-            self.engine.crop_page(self.current_page_index, rect)
+        rect = self.get_selection_pdf_rect()
+        if rect:
+            try:
+                self.engine.crop_page(self.current_page_index, rect)
+            except Exception as exc:
+                messagebox.showerror("Crop Error", f"Could not crop the page:\n{exc}")
+                return
             self.mark_document_changed()
             self.toggle_crop_mode(); self.zoom_to_fit()
             self.sidebar.refresh_thumbnail(self.current_page_index)
@@ -890,6 +900,7 @@ class MainWindow:
             if old_engine:
                 old_engine.close()
             self.current_file_path = path
+            self.current_page_index = 0
             self.session.reset()
             self._forms_page_index = None
             self.cancel_signature_placement()
@@ -1013,6 +1024,10 @@ class MainWindow:
         if not d: return messagebox.showinfo("Info", "No notes found.")
         path = filedialog.asksaveasfilename(title="Export Note(s)", defaultextension=".csv")
         if path:
+            for row in d:
+                for key, value in row.items():
+                    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+                        row[key] = "'" + value
             with open(path, 'w', newline='', encoding='utf-8') as f:
                 w = csv.DictWriter(f, fieldnames=["Page", "User", "Created At", "Last Modified", "Comment"])
                 w.writeheader(); w.writerows(d)
@@ -1089,7 +1104,10 @@ class MainWindow:
 
         path = filedialog.asksaveasfilename(defaultextension=".pdf")
         if path:
-            self.engine.extract_pages(sorted(selected_pages), path)
+            try:
+                self.engine.extract_pages(sorted(selected_pages), path)
+            except Exception as exc:
+                messagebox.showerror("Extraction Error", f"Could not extract the selected pages:\n{exc}")
 
     def apply_range_from_entry(self):
         if not self.engine:

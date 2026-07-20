@@ -7,7 +7,6 @@ class DarkMenuBar(ctk.CTkFrame):
     def __init__(self, master, menus, **kwargs):
         super().__init__(master, height=30, corner_radius=0, fg_color="#202020", **kwargs)
         self.pack_propagate(False)
-        self._menus = menus
         self._popup = None
         self._active_button = None
         self._buttons = {}
@@ -23,7 +22,7 @@ class DarkMenuBar(ctk.CTkFrame):
             button.bind("<Enter>", lambda _e, l=label, i=items, b=button: self._switch_on_hover(l, i, b), add="+")
 
     def toggle_menu(self, label, items):
-        button = self._button_for(label)
+        button = self._buttons[label]
         if self._popup and self._active_button is button:
             self.close_menu()
             return
@@ -89,9 +88,6 @@ class DarkMenuBar(ctk.CTkFrame):
     def _root_click(self, event):
         if self._popup and not str(event.widget).startswith(str(self)):
             self.close_menu()
-
-    def _button_for(self, label):
-        return self._buttons[label]
 
     def _switch_on_hover(self, label, items, button):
         if self._popup and self._active_button is not button:

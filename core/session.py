@@ -1,7 +1,6 @@
 class SessionManager:
     def __init__(self):
         self.unsaved_changes = False
-        self.history = []
 
     def mark_changed(self):
         self.unsaved_changes = True
@@ -11,4 +10,3 @@ class SessionManager:
 
     def reset(self):
         self.unsaved_changes = False
-        self.history.clear()

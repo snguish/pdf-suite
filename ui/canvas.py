@@ -8,7 +8,6 @@ class PDFCanvas(ctk.CTkCanvas):
             highlightbackground="#30363d", highlightcolor="#58a6ff",
             takefocus=True, **kwargs
         )
-        self.image_id = None
         self.tk_image = None
         
         # State Tracking
@@ -50,7 +49,7 @@ class PDFCanvas(ctk.CTkCanvas):
         
         # Update scroll region and place image
         self.config(scrollregion=(0, 0, max(cw, iw), max(ch, ih)))
-        self.image_id = self.create_image(pos_x, pos_y, anchor="center", image=self.tk_image)
+        self.create_image(pos_x, pos_y, anchor="center", image=self.tk_image)
 
     def set_modes(self, crop=False, highlight=False, signature=False):
         self.crop_mode, self.highlight_mode, self.signature_mode = crop, highlight, signature
