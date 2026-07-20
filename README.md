@@ -1,5 +1,9 @@
 # PDF Suite
 
+[![CI](https://github.com/snguish/pdf-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/snguish/pdf-suite/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/snguish/pdf-suite)](https://github.com/snguish/pdf-suite/releases/latest)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+
 PDF Suite 1.1.0 is a local Windows desktop application for reviewing, annotating, filling, signing, and organizing PDF documents. Files are processed on the computer and are not uploaded to a remote service.
 
 ## Gallery
@@ -41,6 +45,13 @@ PDF Suite 1.1.0 is a local Windows desktop application for reviewing, annotating
 
 > [!IMPORTANT]
 > Visual signatures are images, not certificate-backed digital signatures. They do not verify signer identity or protect a document from later changes.
+
+## Project resources
+
+- [Releases](https://github.com/snguish/pdf-suite/releases) — portable Windows builds and checksums.
+- [Changelog](CHANGELOG.md) — notable changes by version.
+- [Contributing](CONTRIBUTING.md) — development setup and pull request checks.
+- [Security policy](SECURITY.md) — supported versions and private vulnerability reporting.
 
 ## Run from source
 
