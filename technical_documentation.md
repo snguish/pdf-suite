@@ -83,16 +83,18 @@ The combine operation constructs a separate in-memory document and only replaces
 
 ### 4.4 User-interface layer
 
-`MainWindow` coordinates commands and document state. Version 1.1 introduces File, Pages, and View menus while retaining the existing toolbar during the staged UI migration.
+`MainWindow` coordinates commands and document state. Version 1.1 introduces File, Pages, and View menus together with a compact toolbar for common navigation, saving, zoom, and editing actions.
 
 The current layout is:
 
 ```text
 Menu bar
-Toolbar
-Thumbnail panel | Document canvas | Contextual note inspector
+Compact toolbar with page counter and Fit Page/Fit Width controls
+Thumbnail panel | Document canvas | Contextual Details workspace
 Status bar
 ```
+
+The right-side Details workspace contains Notes, Forms, and Sign tabs. Notes are connected to the existing annotation workflow. Forms and Sign reserve stable locations for the next editing milestone and are explicitly labeled as upcoming rather than presenting inactive controls as complete features.
 
 The Pages menu and thumbnail context menu expose document organization commands. After page structure changes, the thumbnail view is rebuilt against the updated document.
 
@@ -111,7 +113,7 @@ Cursor-focused zoom follows this sequence:
 3. Calculate the PDF coordinate's new canvas position.
 4. Adjust the canvas view so that the same document location remains beneath the pointer.
 
-Zoom is constrained to 10–800 percent.
+Zoom is constrained to 10–800 percent. Fit Page considers both available height and width. Fit Width uses 96 percent of the canvas width and is available through the toolbar, View menu, and `Ctrl + 2`.
 
 Single-letter document shortcuts are ignored when an Entry, Text, ComboBox, or Spinbox has focus. This prevents commands such as crop, highlight, or sidebar toggle from firing while a user types.
 
@@ -213,11 +215,11 @@ Interactive GUI testing is still required for pointer positioning, high-DPI beha
 
 The following work remains:
 
-1. Complete the contextual-panel UI redesign and retire the crowded legacy toolbar.
-2. Add undo and redo using the reserved session history.
-3. Detect and fill existing AcroForm fields.
-4. Add typed, drawn, and imported-image visual signatures.
-5. Add form and signature flattening during export.
+1. Add undo and redo using the reserved session history.
+2. Detect and fill existing AcroForm fields in the Forms tab.
+3. Add typed, drawn, and imported-image visual signatures in the Sign tab.
+4. Add form and signature flattening during export.
+5. Continue responsive-layout testing and retire remaining legacy toolbar behavior.
 6. Improve thumbnail worker isolation and cancellation for large PDFs.
 7. Add automated unit and GUI tests.
 8. Add a Windows installer and optional file-association registration.

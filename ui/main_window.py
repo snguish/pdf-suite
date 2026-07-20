@@ -32,18 +32,20 @@ class MainWindow:
 
     def setup_ui(self):
         self.setup_menu()
-        # --- RIBBON ---
-        self.ribbon = ctk.CTkFrame(self.root, height=50, corner_radius=0, border_width=1, border_color="#333333")
+        # --- COMPACT TOOLBAR ---
+        self.ribbon = ctk.CTkFrame(self.root, height=44, corner_radius=0, border_width=1, border_color="#333333")
         self.ribbon.grid(row=0, column=0, columnspan=4, sticky="ew")
         self.ribbon.grid_columnconfigure((0, 1, 2), weight=1) 
         
         # Group 1: Navigation/File
         self.left_group = ctk.CTkFrame(self.ribbon, fg_color="transparent")
         self.left_group.grid(row=0, column=0, sticky="w", padx=10)
-        ctk.CTkButton(self.left_group, text="Open PDF", width=80, command=self.open_file, fg_color="#3d3d3d").pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="+ Window", width=80, command=self.spawn_new_window, fg_color="#3d3d3d").pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="▲", width=30, command=self.prev_page).pack(side="left", padx=2)
-        ctk.CTkButton(self.left_group, text="▼", width=30, command=self.next_page).pack(side="left", padx=2)
+        ctk.CTkButton(self.left_group, text="Open", width=62, command=self.open_file, fg_color="#3d3d3d").pack(side="left", padx=2)
+        ctk.CTkButton(self.left_group, text="Save", width=62, command=self.save_overwrite, fg_color="#3d3d3d").pack(side="left", padx=2)
+        ctk.CTkButton(self.left_group, text="Previous", width=70, command=self.prev_page).pack(side="left", padx=(10, 2))
+        self.page_label = ctk.CTkLabel(self.left_group, text="No document", width=84)
+        self.page_label.pack(side="left", padx=2)
+        ctk.CTkButton(self.left_group, text="Next", width=52, command=self.next_page).pack(side="left", padx=2)
 
         # Group 2: View Controls
         self.center_group = ctk.CTkFrame(self.ribbon, fg_color="transparent")
@@ -52,7 +54,8 @@ class MainWindow:
         self.zoom_label = ctk.CTkLabel(self.center_group, text="100%", width=50, font=("Segoe UI", 12, "bold"))
         self.zoom_label.pack(side="left")
         ctk.CTkButton(self.center_group, text="+", width=30, command=lambda: self.adjust_zoom(0.1)).pack(side="left", padx=5)
-        ctk.CTkButton(self.center_group, text="Fit Page", width=80, command=self.zoom_to_fit).pack(side="left", padx=5)
+        ctk.CTkButton(self.center_group, text="Fit Page", width=72, command=self.zoom_to_fit).pack(side="left", padx=(8, 2))
+        ctk.CTkButton(self.center_group, text="Fit Width", width=76, command=self.zoom_to_width).pack(side="left", padx=2)
         
         self.snap_var = ctk.BooleanVar(value=True)
         self.snap_switch = ctk.CTkSwitch(self.center_group, text="Text Snap", variable=self.snap_var)
@@ -70,9 +73,9 @@ class MainWindow:
         self.save_dropdown.set("File Actions")
         self.save_dropdown.pack(side="right", padx=5)
 
-        ctk.CTkButton(self.right_group, text="Export Note(s)", width=110, fg_color="#2b7a78", command=self.export_comments).pack(side="right", padx=5)
+        self.context_btn = ctk.CTkButton(self.right_group, text="Details", width=68, fg_color="#3d3d3d", command=self.toggle_inspector)
+        self.context_btn.pack(side="right", padx=2)
         self.extract_mode_btn = ctk.CTkButton(self.right_group, text="Extract Page(s)", width=120, fg_color="#3d3d3d", command=self.toggle_extraction_mode)
-        self.extract_mode_btn.pack(side="right", padx=5)
         self.save_extract_btn = ctk.CTkButton(self.right_group, text="Save Selection", width=100, fg_color="#28a745", command=self.execute_extraction)
         self.range_entry = ctk.CTkEntry(self.right_group, placeholder_text="e.g. 1-5, 10", width=100)
         self.range_entry.bind("<Return>", lambda e: self.apply_range_from_entry())
@@ -95,20 +98,29 @@ class MainWindow:
         self.canvas = PDFCanvas(self.canvas_frame)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         
-        # Note Inspector (Hidden Initially)
+        # Reusable contextual workspace (hidden initially)
         self.inspector_panel = ctk.CTkFrame(self.root, width=280, corner_radius=0, border_width=1, border_color="#333333")
-        ctk.CTkLabel(self.inspector_panel, text="NOTE INSPECTOR", font=("Segoe UI", 12, "bold")).pack(pady=(10, 5))
-        self.created_info = ctk.CTkLabel(self.inspector_panel, text="Created: -", font=("Segoe UI", 10), text_color="#aaaaaa")
+        context_header = ctk.CTkFrame(self.inspector_panel, fg_color="transparent")
+        context_header.pack(fill="x", padx=8, pady=(8, 0))
+        ctk.CTkLabel(context_header, text="DOCUMENT DETAILS", font=("Segoe UI", 12, "bold")).pack(side="left")
+        ctk.CTkButton(context_header, text="X", width=28, fg_color="transparent", command=self.hide_inspector).pack(side="right")
+        self.context_tabs = ctk.CTkTabview(self.inspector_panel, width=280)
+        self.context_tabs.pack(expand=True, fill="both", padx=6, pady=6)
+        self.note_tab = self.context_tabs.add("Notes")
+        self.forms_tab = self.context_tabs.add("Forms")
+        self.sign_tab = self.context_tabs.add("Sign")
+
+        self.created_info = ctk.CTkLabel(self.note_tab, text="Created: -", font=("Segoe UI", 10), text_color="#aaaaaa")
         self.created_info.pack(pady=0)
-        self.modified_info = ctk.CTkLabel(self.inspector_panel, text="Modified: -", font=("Segoe UI", 10), text_color="#aaaaaa")
+        self.modified_info = ctk.CTkLabel(self.note_tab, text="Modified: -", font=("Segoe UI", 10), text_color="#aaaaaa")
         self.modified_info.pack(pady=(0, 10))
-        self.inspector_text = ctk.CTkTextbox(self.inspector_panel, width=260, height=300)
-        self.inspector_text.pack(padx=10, pady=5)
-        self.save_note_btn = ctk.CTkButton(self.inspector_panel, text="Update Note", fg_color="#28a745", command=self.save_inspector_note)
+        self.inspector_text = ctk.CTkTextbox(self.note_tab, width=250, height=300)
+        self.inspector_text.pack(expand=True, fill="both", padx=6, pady=5)
+        self.save_note_btn = ctk.CTkButton(self.note_tab, text="Update Note", fg_color="#28a745", command=self.save_inspector_note)
         self.save_note_btn.pack(pady=10)
         self.save_note_btn.configure(state="disabled")
-        self.close_inspector_btn = ctk.CTkButton(self.inspector_panel, text="Close [X]", width=80, fg_color="#d35b5b", command=self.hide_inspector)
-        self.close_inspector_btn.pack(pady=10)
+        ctk.CTkLabel(self.forms_tab, text="Form-field tools will appear here\nwhen a PDF form is detected.", text_color="#aaaaaa", justify="center").pack(expand=True, padx=12)
+        ctk.CTkLabel(self.sign_tab, text="Visual signature tools will appear here\nin the next editing milestone.", text_color="#aaaaaa", justify="center").pack(expand=True, padx=12)
 
         self.canvas.hover_callback = self.handle_hover
         self.canvas.double_click_callback = self.handle_double_click
@@ -140,8 +152,10 @@ class MainWindow:
         view_menu.add_command(label="Zoom Out", accelerator="-", command=lambda: self.adjust_zoom(-0.1))
         view_menu.add_command(label="Actual Size", accelerator="Ctrl+1", command=self.reset_zoom)
         view_menu.add_command(label="Fit Page", accelerator="Ctrl+0", command=self.zoom_to_fit)
+        view_menu.add_command(label="Fit Width", accelerator="Ctrl+2", command=self.zoom_to_width)
         view_menu.add_separator()
         view_menu.add_command(label="Toggle Thumbnails", accelerator="S", command=self.toggle_sidebar)
+        view_menu.add_command(label="Toggle Details", command=self.toggle_inspector)
         menu_bar.add_cascade(label="View", menu=view_menu)
 
         self.root.configure(menu=menu_bar)
@@ -166,6 +180,7 @@ class MainWindow:
         self.root.bind("<Control-Shift-S>", lambda e: self.export_pdf())
         self.root.bind("<Control-Key-0>", lambda e: self.zoom_to_fit())
         self.root.bind("<Control-Key-1>", lambda e: self.reset_zoom())
+        self.root.bind("<Control-Key-2>", lambda e: self.zoom_to_width())
 
         # Zoom In (+) variations
         self.root.bind("<plus>", lambda e: self.adjust_zoom(0.1))    # Numpad + or Shifted =
@@ -264,13 +279,22 @@ class MainWindow:
     def show_inspector(self):
         if not self.inspector_visible:
             self.inspector_panel.grid(row=1, column=3, sticky="nsew")
-            self.inspector_visible = True; self.root.after(50, self.zoom_to_fit)
+            self.inspector_visible = True
+            self.context_btn.configure(text="Hide Details", width=88)
+            self.root.after(50, self.zoom_to_fit)
 
     def hide_inspector(self):
         if self.inspector_visible:
             self.inspector_panel.grid_remove()
             self.inspector_visible = False; self.active_note_coord = None
+            self.context_btn.configure(text="Details", width=68)
             self.root.after(50, self.zoom_to_fit)
+
+    def toggle_inspector(self):
+        if self.inspector_visible:
+            self.hide_inspector()
+        else:
+            self.show_inspector()
 
     def handle_double_click(self, sx, sy):
         self.focus_note_in_inspector(self.get_pdf_coords(sx, sy))
@@ -279,6 +303,7 @@ class MainWindow:
         content = self.engine.get_comment_at_pos(self.current_page_index, coords)
         if content:
             self.show_inspector()
+            self.context_tabs.set("Notes")
             lines = content.split("\n")
             created_text, modified_text, body_text = "Created: -", "Modified: -", content
             if "---" in lines:
@@ -353,6 +378,7 @@ class MainWindow:
             if self.sidebar:
                 self.sidebar.highlight_active(idx)
                 self.root.after(200, lambda: self.sidebar.scroll_to_page(idx))
+            self.page_label.configure(text=f"{idx + 1} / {len(self.engine.doc)}")
             self.status_label.configure(text=f" Page {idx+1} of {len(self.engine.doc)}")
 
     def open_file(self):
@@ -438,6 +464,15 @@ class MainWindow:
         p = self.engine.doc[self.current_page_index]
         if cw > 40:
             self.current_zoom = min((cw*0.9)/p.rect.width, (ch*0.9)/p.rect.height); self.update_zoom_view()
+    def zoom_to_width(self):
+        if not self.engine:
+            return
+        self.root.update()
+        canvas_width = self.canvas.winfo_width()
+        page = self.engine.doc[self.current_page_index]
+        if canvas_width > 40:
+            self.current_zoom = max(0.1, min(8.0, (canvas_width * 0.96) / page.rect.width))
+            self.update_zoom_view()
     def update_zoom_view(self):
         if self.engine: self.zoom_label.configure(text=f"{int(self.current_zoom*100)}%"); self.load_page(self.current_page_index)
     def save_overwrite(self):
@@ -488,10 +523,12 @@ class MainWindow:
         self.extraction_mode = not self.extraction_mode
         if self.extraction_mode:
             self.extract_mode_btn.configure(text="Cancel", fg_color="#d35b5b")
+            self.extract_mode_btn.pack(side="right", padx=2)
             self.range_entry.pack(side="right", padx=2); self.save_extract_btn.pack(side="right", padx=5)
             if self.sidebar: self.sidebar.toggle_extraction_mode(True)
         else:
             self.extract_mode_btn.configure(text="Extract Page(s)", fg_color="#3d3d3d")
+            self.extract_mode_btn.pack_forget()
             self.range_entry.pack_forget(); self.save_extract_btn.pack_forget()
             if self.sidebar: self.sidebar.toggle_extraction_mode(False)
     def parse_page_range_entry(self):
